@@ -35,7 +35,8 @@ bool MainWindow::Create(HINSTANCE instance, int cmdShow)
 
     if (!m_window)
         return false;
-
+    
+    m_uiManager.Create(m_window);
     ShowWindow(m_window, cmdShow);
     UpdateWindow(m_window);
 

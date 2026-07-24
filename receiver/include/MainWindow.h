@@ -2,6 +2,8 @@
 
 #include <windows.h>
 
+#include "UIManager.h"
+
 class MainWindow
 {
 public:
@@ -26,6 +28,8 @@ private:
 private:
     HWND m_window = nullptr;
     HINSTANCE m_instance = nullptr;
+
+    UIManager m_uiManager;
 
     static constexpr const wchar_t* WINDOW_CLASS =
         L"SYNKROAD_MainWindow";

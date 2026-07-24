@@ -17,6 +17,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 add_executable(SYNKROADReceiver WIN32
     src/main.cpp
     src/MainWindow.cpp
+    src/UIManager.cpp
 )
 
 # ------------------------------------------------------------
