@@ -13,8 +13,6 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # ------------------------------------------------------------
 # Executable
 # ------------------------------------------------------------
-
-add_executable(SYNKROADReceiver
     src/main.cpp
     src/MainWindow.cpp
 )
