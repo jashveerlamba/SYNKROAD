@@ -1,41 +1,33 @@
 #include "MainWindow.h"
 
-MainWindow::MainWindow()
-    : m_window(nullptr),
-      m_instance(nullptr)
-{
-}
+MainWindow::MainWindow() = default;
 
-MainWindow::~MainWindow()
-{
-}
+MainWindow::~MainWindow() = default;
 
 bool MainWindow::Create(HINSTANCE instance, int cmdShow)
 {
     m_instance = instance;
 
-    const wchar_t CLASS_NAME[] = L"SYNKROAD_MainWindow";
-
     WNDCLASSEXW wc{};
     wc.cbSize = sizeof(WNDCLASSEXW);
-    wc.style = CS_HREDRAW | CS_VREDRAW;
     wc.lpfnWndProc = MainWindow::WindowProc;
     wc.hInstance = m_instance;
     wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
     wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
-    wc.lpszClassName = CLASS_NAME;
+    wc.lpszClassName = WINDOW_CLASS;
 
-    RegisterClassExW(&wc);
+    if (!RegisterClassExW(&wc))
+        return false;
 
     m_window = CreateWindowExW(
         0,
-        CLASS_NAME,
-        L"SYNKROAD Receiver",
+        WINDOW_CLASS,
+        WINDOW_TITLE,
         WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
         CW_USEDEFAULT,
         CW_USEDEFAULT,
         900,
-        600,
+        650,
         nullptr,
         nullptr,
         m_instance,
@@ -73,13 +65,13 @@ LRESULT CALLBACK MainWindow::WindowProc(
 
     if (message == WM_NCCREATE)
     {
-        CREATESTRUCT* create =
-            reinterpret_cast<CREATESTRUCT*>(lParam);
+        auto* create =
+            reinterpret_cast<CREATESTRUCTW*>(lParam);
 
         window =
             static_cast<MainWindow*>(create->lpCreateParams);
 
-        SetWindowLongPtr(
+        SetWindowLongPtrW(
             hwnd,
             GWLP_USERDATA,
             reinterpret_cast<LONG_PTR>(window));
@@ -89,22 +81,13 @@ LRESULT CALLBACK MainWindow::WindowProc(
     else
     {
         window = reinterpret_cast<MainWindow*>(
-            GetWindowLongPtr(hwnd, GWLP_USERDATA));
+            GetWindowLongPtrW(hwnd, GWLP_USERDATA));
     }
 
     if (window)
-    {
-        return window->HandleMessage(
-            message,
-            wParam,
-            lParam);
-    }
+        return window->HandleMessage(message, wParam, lParam);
 
-    return DefWindowProc(
-        hwnd,
-        message,
-        wParam,
-        lParam);
+    return DefWindowProcW(hwnd, message, wParam, lParam);
 }
 
 LRESULT MainWindow::HandleMessage(
@@ -119,7 +102,7 @@ LRESULT MainWindow::HandleMessage(
         return 0;
     }
 
-    return DefWindowProc(
+    return DefWindowProcW(
         m_window,
         message,
         wParam,

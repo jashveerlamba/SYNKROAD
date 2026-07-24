@@ -5,17 +5,13 @@
 class MainWindow
 {
 public:
-
     MainWindow();
-
     ~MainWindow();
 
     bool Create(HINSTANCE instance, int cmdShow);
-
     int Run();
 
 private:
-
     static LRESULT CALLBACK WindowProc(
         HWND hwnd,
         UINT message,
@@ -28,8 +24,12 @@ private:
         LPARAM lParam);
 
 private:
+    HWND m_window = nullptr;
+    HINSTANCE m_instance = nullptr;
 
-    HWND m_window;
+    static constexpr const wchar_t* WINDOW_CLASS =
+        L"SYNKROAD_MainWindow";
 
-    HINSTANCE m_instance;
+    static constexpr const wchar_t* WINDOW_TITLE =
+        L"SYNKROAD Receiver";
 };
