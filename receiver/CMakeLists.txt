@@ -13,6 +13,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # ------------------------------------------------------------
 # Executable
 # ------------------------------------------------------------
+
 add_executable(SYNKROADReceiver WIN32
     src/main.cpp
     src/MainWindow.cpp
@@ -23,8 +24,8 @@ add_executable(SYNKROADReceiver WIN32
 # ------------------------------------------------------------
 
 target_include_directories(SYNKROADReceiver
-PRIVATE
-    include
+    PRIVATE
+        include
 )
 
 # ------------------------------------------------------------
@@ -32,10 +33,10 @@ PRIVATE
 # ------------------------------------------------------------
 
 target_link_libraries(SYNKROADReceiver
-PRIVATE
-    ws2_32
-    user32
-    gdi32
+    PRIVATE
+        ws2_32
+        user32
+        gdi32
 )
 
 # ------------------------------------------------------------
@@ -43,11 +44,9 @@ PRIVATE
 # ------------------------------------------------------------
 
 if(MSVC)
-
     target_compile_options(SYNKROADReceiver PRIVATE
         /W4
         /EHsc
         /permissive-
     )
-
 endif()
