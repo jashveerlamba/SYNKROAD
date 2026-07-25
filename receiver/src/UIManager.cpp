@@ -19,20 +19,26 @@ bool UIManager::Create(HWND parent)
         GetModuleHandleW(nullptr),
         nullptr);
 
-    // Connect Button (temporary)
-    m_connectButton = CreateWindowExW(
-        0,
-        L"BUTTON",
-        L"Connect",
-        WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-        700,
-        12,
-        150,
-        35,
-        m_parent,
-        reinterpret_cast<HMENU>(1001),
-        GetModuleHandleW(nullptr),
-        nullptr);
+    // Connect Toggle
+    if (!m_connectToggle.Create(
+            m_parent,
+            1001,
+            700,
+            12,
+            70,
+            35))
+    {
+        return false;
+    }
+
+    m_connectToggle.SetChecked(false);
+
+    m_connectToggle.SetOnToggle(
+        [](bool connected)
+        {
+            // Placeholder for future connection logic.
+            (void)connected;
+        });
 
     return true;
 }

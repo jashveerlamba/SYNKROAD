@@ -2,6 +2,8 @@
 
 #include <windows.h>
 
+#include "ui/controls/ToggleSwitch.h"
+
 class UIManager
 {
 public:
@@ -15,5 +17,5 @@ private:
 
     // Top Bar
     HWND m_logoLabel = nullptr;
-    HWND m_connectButton = nullptr;
+    ToggleSwitch m_connectToggle;
 };
