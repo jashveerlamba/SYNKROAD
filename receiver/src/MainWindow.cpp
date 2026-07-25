@@ -23,7 +23,7 @@ bool MainWindow::Create(HINSTANCE instance, int cmdShow)
         0,
         WINDOW_CLASS,
         WINDOW_TITLE,
-        WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
+        WS_OVERLAPPEDWINDOW, // Updated to allow resizing and layout recalculations
         CW_USEDEFAULT,
         CW_USEDEFAULT,
         900,
@@ -98,6 +98,13 @@ LRESULT MainWindow::HandleMessage(
 {
     switch (message)
     {
+    case WM_SIZE:
+        if (wParam != SIZE_MINIMIZED)
+        {
+            m_uiManager.UpdateLayout();
+        }
+        return 0;
+
     case WM_DESTROY:
         PostQuitMessage(0);
         return 0;
