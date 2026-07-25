@@ -10,7 +10,7 @@ bool UIManager::Create(HWND parent)
         L"STATIC",
         L"SYNKROAD",
         WS_CHILD | WS_VISIBLE,
-        0, 0, 0, 0, // Positioned dynamically in UpdateLayout
+        0, 0, 0, 0,
         m_parent,
         nullptr,
         GetModuleHandleW(nullptr),
@@ -19,28 +19,67 @@ bool UIManager::Create(HWND parent)
     if (!m_logoLabel)
         return false;
 
+    // Connection Status Indicator Label
+    m_statusLabel = CreateWindowExW(
+        0,
+        L"STATIC",
+        L"Disconnected",
+        WS_CHILD | WS_VISIBLE | SS_CENTER,
+        0, 0, 0, 0,
+        m_parent,
+        nullptr,
+        GetModuleHandleW(nullptr),
+        nullptr);
+
+    if (!m_statusLabel)
+        return false;
+
     // Connect Toggle Switch
     if (!m_connectToggle.Create(
             m_parent,
             1001,
-            0, 0, 0, 0)) // Positioned dynamically in UpdateLayout
+            0, 0, 0, 0))
     {
         return false;
     }
 
     m_connectToggle.SetChecked(false);
 
+    // Wire up toggle switch to demo status changes
     m_connectToggle.SetOnToggle(
-        [](bool connected)
+        [this](bool connected)
         {
-            // Placeholder for future connection logic.
-            (void)connected;
+            SetConnectionStatus(connected ? ConnectionStatus::Connected : ConnectionStatus::Disconnected);
         });
 
-    // Initial Layout Calculation
+    // Initial Status & Layout Calculation
+    SetConnectionStatus(ConnectionStatus::Disconnected);
     UpdateLayout();
 
     return true;
+}
+
+void UIManager::SetConnectionStatus(ConnectionStatus status)
+{
+    m_currentStatus = status;
+
+    if (!m_statusLabel)
+        return;
+
+    switch (m_currentStatus)
+    {
+    case ConnectionStatus::Disconnected:
+        SetWindowTextW(m_statusLabel, L"Disconnected");
+        break;
+    case ConnectionStatus::Connecting:
+        SetWindowTextW(m_statusLabel, L"Connecting...");
+        break;
+    case ConnectionStatus::Connected:
+        SetWindowTextW(m_statusLabel, L"Connected");
+        break;
+    }
+
+    InvalidateRect(m_statusLabel, nullptr, TRUE);
 }
 
 void UIManager::UpdateLayout()
@@ -67,21 +106,30 @@ void UIManager::UpdateLayout()
     }
 
     // 2. Position Connect Toggle Switch (Right-aligned)
+    int toggleX = clientWidth - TOP_BAR_PADDING_X - TOGGLE_WIDTH;
     if (m_connectToggle.Handle())
     {
-        int toggleX = clientWidth - TOP_BAR_PADDING_X - TOGGLE_WIDTH;
-        if (toggleX < TOP_BAR_PADDING_X + LOGO_WIDTH + 10)
-        {
-            toggleX = TOP_BAR_PADDING_X + LOGO_WIDTH + 10;
-        }
-
         SetWindowPos(
             m_connectToggle.Handle(),
             nullptr,
             toggleX,
-            TOP_BAR_PADDING_Y - 2, // Minor visual adjustment to align center with logo text
+            TOP_BAR_PADDING_Y - 2,
             TOGGLE_WIDTH,
             TOGGLE_HEIGHT,
+            SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+
+    // 3. Position Status Label (Left of Toggle Switch)
+    if (m_statusLabel)
+    {
+        int statusX = toggleX - STATUS_WIDTH - 10;
+        SetWindowPos(
+            m_statusLabel,
+            nullptr,
+            statusX,
+            TOP_BAR_PADDING_Y + 3,
+            STATUS_WIDTH,
+            STATUS_HEIGHT,
             SWP_NOZORDER | SWP_NOACTIVATE);
     }
 }

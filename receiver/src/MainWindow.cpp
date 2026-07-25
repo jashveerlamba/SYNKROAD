@@ -23,7 +23,7 @@ bool MainWindow::Create(HINSTANCE instance, int cmdShow)
         0,
         WINDOW_CLASS,
         WINDOW_TITLE,
-        WS_OVERLAPPEDWINDOW, // Updated to allow resizing and layout recalculations
+        WS_OVERLAPPEDWINDOW,
         CW_USEDEFAULT,
         CW_USEDEFAULT,
         900,
@@ -104,6 +104,33 @@ LRESULT MainWindow::HandleMessage(
             m_uiManager.UpdateLayout();
         }
         return 0;
+
+    case WM_CTLCOLORSTATIC:
+    {
+        HDC hdcStatic = reinterpret_cast<HDC>(wParam);
+        HWND hwndStatic = reinterpret_cast<HWND>(lParam);
+
+        // Retrieve current text in status label to determine state color
+        wchar_t text[64]={0};
+        GetWindowTextW(hwndStatic, text, 64);
+        std::wstring strText(text);
+
+        if (strText == L"Connected")
+        {
+            SetTextColor(hdcStatic, RGB(40, 167, 69)); // Green
+        }
+        else if (strText == L"Connecting...")
+        {
+            SetTextColor(hdcStatic, RGB(255, 140, 0)); // Orange
+        }
+        else if (strText == L"Disconnected")
+        {
+            SetTextColor(hdcStatic, RGB(128, 128, 128)); // Gray
+        }
+
+        SetBkMode(hdcStatic, TRANSPARENT);
+        return reinterpret_cast<INT_PTR>(GetSysColorBrush(COLOR_WINDOW));
+    }
 
     case WM_DESTROY:
         PostQuitMessage(0);
