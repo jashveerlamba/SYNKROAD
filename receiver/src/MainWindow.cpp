@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include <string>
 
 MainWindow::MainWindow() = default;
 
@@ -111,19 +112,18 @@ LRESULT MainWindow::HandleMessage(
         HWND hwndStatic = reinterpret_cast<HWND>(lParam);
 
         // Retrieve current text in status label to determine state color
-        wchar_t text[64]={0};
+        wchar_t text[64] = { 0 };
         GetWindowTextW(hwndStatic, text, 64);
-        std::wstring strText(text);
 
-        if (strText == L"Connected")
+        if (wcscmp(text, L"Connected") == 0)
         {
             SetTextColor(hdcStatic, RGB(40, 167, 69)); // Green
         }
-        else if (strText == L"Connecting...")
+        else if (wcscmp(text, L"Connecting...") == 0)
         {
             SetTextColor(hdcStatic, RGB(255, 140, 0)); // Orange
         }
-        else if (strText == L"Disconnected")
+        else if (wcscmp(text, L"Disconnected") == 0)
         {
             SetTextColor(hdcStatic, RGB(128, 128, 128)); // Gray
         }
