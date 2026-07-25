@@ -31,10 +31,11 @@ bool ToggleSwitch::Create(
     int width,
     int height)
 {
+    m_parent = parent;
     HINSTANCE instance = GetModuleHandleW(nullptr);
     RegisterControl(instance);
 
-    m_hwnd = CreateWindowExW(
+    m_window = CreateWindowExW(
         0,
         CLASS_NAME,
         L"",
@@ -48,7 +49,7 @@ bool ToggleSwitch::Create(
         instance,
         this);
 
-    return m_hwnd != nullptr;
+    return m_window != nullptr;
 }
 
 bool ToggleSwitch::IsChecked() const
@@ -56,17 +57,15 @@ bool ToggleSwitch::IsChecked() const
     return m_checked;
 }
 
-void SetCheckedInternal(ToggleSwitch* control, bool checked, bool triggerCallback)
-{
-    // Utility check
-}
-
 void ToggleSwitch::SetChecked(bool checked)
 {
     if (m_checked != checked)
     {
         m_checked = checked;
-        InvalidateRect(m_hwnd, nullptr, FALSE);
+        if (m_window)
+        {
+            InvalidateRect(m_window, nullptr, FALSE);
+        }
     }
 }
 
@@ -75,8 +74,11 @@ void ToggleSwitch::SetEnabled(bool enabled)
     if (m_enabled != enabled)
     {
         m_enabled = enabled;
-        EnableWindow(m_hwnd, enabled ? TRUE : FALSE);
-        InvalidateRect(m_hwnd, nullptr, FALSE);
+        if (m_window)
+        {
+            EnableWindow(m_window, enabled ? TRUE : FALSE);
+            InvalidateRect(m_window, nullptr, FALSE);
+        }
     }
 }
 
@@ -90,7 +92,10 @@ void ToggleSwitch::Toggle()
     if (!m_enabled) return;
 
     m_checked = !m_checked;
-    InvalidateRect(m_hwnd, nullptr, FALSE);
+    if (m_window)
+    {
+        InvalidateRect(m_window, nullptr, FALSE);
+    }
 
     if (m_callback)
     {
@@ -109,9 +114,9 @@ LRESULT ToggleSwitch::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
     case WM_PAINT:
     {
         PAINTSTRUCT ps;
-        HDC hdc = BeginPaint(m_hwnd, &ps);
+        HDC hdc = BeginPaint(m_window, &ps);
         Paint(hdc);
-        EndPaint(m_hwnd, &ps);
+        EndPaint(m_window, &ps);
         return 0;
     }
 
@@ -120,8 +125,9 @@ LRESULT ToggleSwitch::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         if (!m_trackingMouse)
         {
             TRACKMOUSEEVENT tme = { sizeof(TRACKMOUSEEVENT) };
+            tme.cbSize = sizeof(TRACKMOUSEEVENT);
             tme.dwFlags = TME_LEAVE;
-            tme.hwndTrack = m_hwnd;
+            tme.hwndTrack = m_window;
             TrackMouseEvent(&tme);
             m_trackingMouse = true;
         }
@@ -129,7 +135,7 @@ LRESULT ToggleSwitch::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         if (!m_hovered)
         {
             m_hovered = true;
-            InvalidateRect(m_hwnd, nullptr, FALSE);
+            InvalidateRect(m_window, nullptr, FALSE);
         }
         return 0;
     }
@@ -139,7 +145,7 @@ LRESULT ToggleSwitch::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         m_trackingMouse = false;
         m_hovered = false;
         m_pressed = false;
-        InvalidateRect(m_hwnd, nullptr, FALSE);
+        InvalidateRect(m_window, nullptr, FALSE);
         return 0;
     }
 
@@ -147,10 +153,10 @@ LRESULT ToggleSwitch::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
     {
         if (m_enabled)
         {
-            SetFocus(m_hwnd);
+            SetFocus(m_window);
             m_pressed = true;
-            SetCapture(m_hwnd);
-            InvalidateRect(m_hwnd, nullptr, FALSE);
+            SetCapture(m_window);
+            InvalidateRect(m_window, nullptr, FALSE);
         }
         return 0;
     }
@@ -163,7 +169,7 @@ LRESULT ToggleSwitch::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
             m_pressed = false;
 
             RECT rc;
-            GetClientRect(m_hwnd, &rc);
+            GetClientRect(m_window, &rc);
             POINT pt = { LOWORD(lParam), HIWORD(lParam) };
             if (PtInRect(&rc, pt))
             {
@@ -171,7 +177,7 @@ LRESULT ToggleSwitch::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
             }
             else
             {
-                InvalidateRect(m_hwnd, nullptr, FALSE);
+                InvalidateRect(m_window, nullptr, FALSE);
             }
         }
         return 0;
@@ -180,14 +186,14 @@ LRESULT ToggleSwitch::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
     case WM_SETFOCUS:
     {
         m_focused = true;
-        InvalidateRect(m_hwnd, nullptr, FALSE);
+        InvalidateRect(m_window, nullptr, FALSE);
         return 0;
     }
 
     case WM_KILLFOCUS:
     {
         m_focused = false;
-        InvalidateRect(m_hwnd, nullptr, FALSE);
+        InvalidateRect(m_window, nullptr, FALSE);
         return 0;
     }
 
@@ -196,7 +202,7 @@ LRESULT ToggleSwitch::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         if (wParam == VK_SPACE && m_enabled)
         {
             m_pressed = true;
-            InvalidateRect(m_hwnd, nullptr, FALSE);
+            InvalidateRect(m_window, nullptr, FALSE);
             return 0;
         }
         break;
@@ -219,18 +225,18 @@ LRESULT ToggleSwitch::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
     case WM_ENABLE:
     {
         m_enabled = (wParam != FALSE);
-        InvalidateRect(m_hwnd, nullptr, FALSE);
+        InvalidateRect(m_window, nullptr, FALSE);
         return 0;
     }
     }
 
-    return DefWindowProcW(m_hwnd, message, wParam, lParam);
+    return DefWindowProcW(m_window, message, wParam, lParam);
 }
 
 void ToggleSwitch::Paint(HDC hdc)
 {
     RECT clientRect;
-    GetClientRect(m_hwnd, &clientRect);
+    GetClientRect(m_window, &clientRect);
     int width = clientRect.right - clientRect.left;
     int height = clientRect.bottom - clientRect.top;
 
@@ -242,7 +248,7 @@ void ToggleSwitch::Paint(HDC hdc)
     HBITMAP oldBitmap = static_cast<HBITMAP>(SelectObject(memDC, memBitmap));
 
     // Determine parent background color
-    HWND parentHwnd = GetParent(m_hwnd);
+    HWND parentHwnd = GetParent(m_window);
     HBRUSH bgBrush = reinterpret_cast<HBRUSH>(GetClassLongPtrW(parentHwnd, GCLP_HBRBACKGROUND));
     if (!bgBrush)
     {
