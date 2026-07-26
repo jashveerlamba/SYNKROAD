@@ -1,6 +1,7 @@
 #pragma once
 
 #include <windows.h>
+#include <string>
 
 #include "ui/controls/ToggleSwitch.h"
 
@@ -22,11 +23,22 @@ public:
 
     void SetConnectionStatus(ConnectionStatus status);
 
+    // Status Bar API
+    void SetVersion(const std::wstring& version);
+    void SetConnectionStateText(const std::wstring& state);
+    void SetNetworkInfo(const std::wstring& info);
+    void SetFPS(int fps);
+    void SetLatency(int latencyMs);
+
     HWND GetContentPanelHandle() const { return m_contentPanel; }
+    HWND GetStatusBarHandle() const { return m_statusBar; }
 
 private:
     static ATOM RegisterContentPanelClass(HINSTANCE instance);
+    static ATOM RegisterStatusBarClass(HINSTANCE instance);
+
     static LRESULT CALLBACK ContentPanelProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
+    static LRESULT CALLBACK StatusBarProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
 
 private:
     HWND m_parent = nullptr;
@@ -39,9 +51,19 @@ private:
     // Main Content Panel
     HWND m_contentPanel = nullptr;
 
+    // Status Bar
+    HWND m_statusBar = nullptr;
+
     ConnectionStatus m_currentStatus = ConnectionStatus::Disconnected;
 
-    // Top Bar Layout Constants
+    // Runtime Status Bar Values
+    std::wstring m_strVersion = L"v1.0.0";
+    std::wstring m_strConnState = L"Disconnected";
+    std::wstring m_strNetwork = L"No Device";
+    std::wstring m_strFPS = L"0 FPS";
+    std::wstring m_strLatency = L"-- ms";
+
+    // Layout Constants
     static constexpr int TOP_BAR_PADDING_X = 20;
     static constexpr int TOP_BAR_PADDING_Y = 15;
     static constexpr int LOGO_WIDTH = 180;
@@ -51,6 +73,8 @@ private:
     static constexpr int TOGGLE_WIDTH = 70;
     static constexpr int TOGGLE_HEIGHT = 35;
     static constexpr int TOP_BAR_TOTAL_HEIGHT = 60;
+    static constexpr int STATUS_BAR_HEIGHT = 28;
 
     static constexpr const wchar_t* CONTENT_PANEL_CLASS = L"SYNKROAD_ContentPanel";
+    static constexpr const wchar_t* STATUS_BAR_CLASS = L"SYNKROAD_StatusBar";
 };
