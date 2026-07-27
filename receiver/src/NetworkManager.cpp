@@ -365,7 +365,11 @@ void NetworkManager::ListeningWorker()
                 {
                     m_currentSession.lastHeartbeatTimestamp = now;
 
-                    if (header->type == PacketType::Heartbeat)
+                    if (header->type == PacketType::ControllerInput)
+                    {
+                        m_inputManager.ProcessInputPacket(buffer.data(), bytesRecv, GetSessionID());
+                    }
+                    else if (header->type == PacketType::Heartbeat)
                     {
                         ProcessHeartbeat();
                     }

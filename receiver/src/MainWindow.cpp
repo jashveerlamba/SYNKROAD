@@ -56,7 +56,6 @@ bool MainWindow::Create(HINSTANCE instance, int cmdShow)
 
     m_uiManager.Create(m_window);
 
-    // Thread-safe Network status updates via PostMessage
     m_networkManager.SetStatusCallback(
         [this](NetworkState state, const std::wstring& message)
         {
@@ -64,11 +63,17 @@ bool MainWindow::Create(HINSTANCE instance, int cmdShow)
             PostMessageW(m_window, WM_USER_NETWORK_STATE_CHANGE, 0, reinterpret_cast<LPARAM>(payload));
         });
 
-    // Thread-safe Latency updates
     m_networkManager.SetLatencyCallback(
         [this](uint32_t latencyMs)
         {
             PostMessageW(m_window, WM_USER_LATENCY_UPDATE, static_cast<WPARAM>(latencyMs), 0);
+        });
+
+    m_networkManager.GetInputManager().SetLogCallback(
+        [this](const std::wstring& message, bool isError)
+        {
+            if (isError) m_uiManager.LogError(message);
+            else m_uiManager.LogInfo(message);
         });
 
     if (m_networkManager.Initialize())
@@ -179,6 +184,13 @@ LRESULT MainWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
     {
         uint32_t latencyMs = static_cast<uint32_t>(wParam);
         m_uiManager.SetLatency(latencyMs);
+
+        if (m_networkManager.IsConnected())
+        {
+            auto stats = m_networkManager.GetInputManager().GetInputStatistics();
+            std::wstring diag = L"Input: " + std::to_wstring(stats.packetsPerSecond) + L" PPS | Drop: " + std::to_wstring(stats.droppedPackets);
+            m_uiManager.SetNetworkInfo(diag);
+        }
         return 0;
     }
 

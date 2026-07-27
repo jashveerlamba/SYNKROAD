@@ -21,7 +21,7 @@ enum class PacketType : uint8_t
     Ack               = 0x07,
     Ping              = 0x08,
     Pong              = 0x09,
-    ControllerInput   = 0x10 // Reserved for STEP 22
+    ControllerInput   = 0x10
 };
 
 enum class HandshakeResult : uint8_t
@@ -44,6 +44,68 @@ struct TransportHeader
     uint64_t timestamp;
     uint16_t payloadLength;
     uint32_t crc32;
+};
+
+// Button Bitmasks for Controller Input
+namespace ControllerButtons
+{
+    constexpr uint32_t A            = 1 << 0;
+    constexpr uint32_t B            = 1 << 1;
+    constexpr uint32_t X            = 1 << 2;
+    constexpr uint32_t Y            = 1 << 3;
+    constexpr uint32_t LB           = 1 << 4;
+    constexpr uint32_t RB           = 1 << 5;
+    constexpr uint32_t L3           = 1 << 6;
+    constexpr uint32_t R3           = 1 << 7;
+    constexpr uint32_t START        = 1 << 8;
+    constexpr uint32_t SELECT       = 1 << 9;
+    constexpr uint32_t HOME         = 1 << 10;
+    constexpr uint32_t DPAD_UP      = 1 << 11;
+    constexpr uint32_t DPAD_DOWN    = 1 << 12;
+    constexpr uint32_t DPAD_LEFT    = 1 << 13;
+    constexpr uint32_t DPAD_RIGHT   = 1 << 14;
+    constexpr uint32_t PADDLE_LEFT  = 1 << 15;
+    constexpr uint32_t PADDLE_RIGHT = 1 << 16;
+}
+
+struct ControllerInputPayload
+{
+    uint16_t profileId;
+    uint8_t layoutVersion;
+    uint8_t flags; // Bit 0: Is Full Sync (1) vs Delta (0)
+
+    uint32_t buttons;      // Bitmask of pressed digital buttons
+    int16_t steering;      // Normalized steering (-32768 to 32767)
+    uint16_t throttle;     // Trigger axis (0 to 65535)
+    uint16_t brake;        // Trigger axis (0 to 65535)
+    uint16_t clutch;       // Trigger/Slider axis (0 to 65535)
+    
+    int16_t leftStickX;    // Joysticks (-32768 to 32767)
+    int16_t leftStickY;
+    int16_t rightStickX;
+    int16_t rightStickY;
+
+    int16_t slider1;       // Auxiliary Sliders (-32768 to 32767)
+    int16_t slider2;
+
+    // Touchpad Placeholder
+    int16_t touchX;
+    int16_t touchY;
+    uint8_t touchPressed;
+
+    // Motion Sensor Placeholders (6-axis IMU)
+    int16_t gyroX;
+    int16_t gyroY;
+    int16_t gyroZ;
+    int16_t accelX;
+    int16_t accelY;
+    int16_t accelZ;
+};
+
+struct ControllerInputPacket
+{
+    TransportHeader header;
+    ControllerInputPayload inputData;
 };
 
 struct DiscoveryRequestPacket

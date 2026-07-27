@@ -17,6 +17,8 @@ add_executable(SYNKROADReceiver WIN32
     src/UIManager.cpp
     src/ConfigManager.cpp
     src/NetworkManager.cpp
+    src/InputManager.cpp
+    src/ControllerState.cpp
     src/ui/controls/ToggleSwitch.cpp
 )
 

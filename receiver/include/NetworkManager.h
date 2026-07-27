@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "NetworkProtocol.h"
+#include "InputManager.h"
 
 #pragma comment(lib, "Ws2_32.lib")
 #pragma comment(lib, "Bcrypt.lib")
@@ -93,6 +94,9 @@ public:
     NetworkState GetStatus() const;
     uint32_t GetCurrentLatency() const;
 
+    InputManager& GetInputManager() { return m_inputManager; }
+    const InputManager& GetInputManager() const { return m_inputManager; }
+
     void SetStatusCallback(StatusCallback callback);
     void SetLatencyCallback(LatencyCallback callback);
 
@@ -127,6 +131,7 @@ private:
     std::atomic<bool> m_discoveryRunning{ false };
 
     DeviceSession m_currentSession;
+    InputManager m_inputManager;
     uint32_t m_outgoingSequenceNumber = 0;
     uint32_t m_expectedSequenceNumber = 0;
     uint64_t m_lastPingSentTime = 0;
