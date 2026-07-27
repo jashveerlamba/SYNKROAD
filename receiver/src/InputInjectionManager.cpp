@@ -123,5 +123,5 @@ InjectionStats InputInjectionManager::GetInjectionStatistics() const
     {
         return m_activeBackend->GetStatistics();
     }
-    return {};
+    return InjectionStats{};
 }

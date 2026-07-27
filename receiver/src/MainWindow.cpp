@@ -16,13 +16,14 @@ MainWindow::~MainWindow()
 
 bool MainWindow::Initialize(HINSTANCE hInstance, int nCmdShow)
 {
-    WNDCLASSEX wc = { 0 };
+    WNDCLASSEX wc;
+    ZeroMemory(&wc, sizeof(WNDCLASSEX));
     wc.cbSize = sizeof(WNDCLASSEX);
     wc.style = CS_HREDRAW | CS_VREDRAW;
     wc.lpfnWndProc = WindowProc;
     wc.hInstance = hInstance;
     wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+    wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
     wc.lpszClassName = L"SYNKROADReceiverWindowClass";
     wc.hIcon = LoadIcon(NULL, IDI_APPLICATION);
     wc.hIconSm = LoadIcon(NULL, IDI_APPLICATION);
@@ -58,7 +59,8 @@ bool MainWindow::Initialize(HINSTANCE hInstance, int nCmdShow)
 
 void MainWindow::RunMessageLoop()
 {
-    MSG msg = { 0 };
+    MSG msg;
+    ZeroMemory(&msg, sizeof(MSG));
     while (GetMessage(&msg, NULL, 0, 0))
     {
         TranslateMessage(&msg);
@@ -72,14 +74,14 @@ LRESULT CALLBACK MainWindow::WindowProc(HWND hwnd, UINT message, WPARAM wParam, 
 
     if (message == WM_NCCREATE)
     {
-        CREATESTRUCT* pCreate = (CREATESTRUCT*)lParam;
-        pThis = (MainWindow*)pCreate->lpCreateParams;
-        SetWindowLongPtr(hwnd, GWLP_USERDATA, (LONG_PTR)pThis);
+        CREATESTRUCT* pCreate = reinterpret_cast<CREATESTRUCT*>(lParam);
+        pThis = reinterpret_cast<MainWindow*>(pCreate->lpCreateParams);
+        SetWindowLongPtr(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(pThis));
         pThis->m_hwnd = hwnd;
     }
     else
     {
-        pThis = (MainWindow*)GetWindowLongPtr(hwnd, GWLP_USERDATA);
+        pThis = reinterpret_cast<MainWindow*>(GetWindowLongPtr(hwnd, GWLP_USERDATA));
     }
 
     if (pThis)
@@ -96,30 +98,24 @@ LRESULT MainWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
     {
     case WM_CREATE:
     {
-        // Load initial config
         m_configManager.LoadConfig();
         
-        // Initialize UI components
         if (!m_uiManager.Initialize(m_hwnd, m_configManager.GetConfig()))
         {
             MessageBox(m_hwnd, L"Failed to initialize UI Manager.", L"Error", MB_ICONERROR);
             return -1;
         }
 
-        // Set up Network Logging Callback
         m_networkManager.SetLogCallback([this](const std::wstring& msg, bool isError) {
             m_uiManager.AppendLog(msg, isError);
         });
 
-        // Set up Input Manager & Injection Framework Callback
         m_networkManager.GetInputManager().SetLogCallback([this](const std::wstring& msg, bool isError) {
             m_uiManager.AppendLog(msg, isError);
         });
 
-        // Register window handle to receive custom network notifications
         m_networkManager.SetNotificationWindow(m_hwnd);
 
-        // Auto-start listener service
         if (!m_networkManager.Start(m_configManager.GetConfig().port))
         {
             m_uiManager.AppendLog(L"Failed to start Network Receiver on configured port.", true);
@@ -141,8 +137,7 @@ LRESULT MainWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         int wmId = LOWORD(wParam);
         int wmEvent = HIWORD(wParam);
 
-        // Handle UI control interactions
-        m_uiManager.HandleCommand(wmId, wmEvent, (HWND)lParam);
+        m_uiManager.HandleCommand(wmId, wmEvent, reinterpret_cast<HWND>(lParam));
         return 0;
     }
 
@@ -158,7 +153,6 @@ LRESULT MainWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         else
         {
             m_uiManager.AppendLog(L"Client disconnected. Resetting injection pipeline...");
-            // Safely release active injection states on disconnection
             m_networkManager.GetInputManager().ResetPipeline();
             m_uiManager.SetNetworkInfo(L"Disconnected");
         }
@@ -187,7 +181,6 @@ LRESULT MainWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
 
     case WM_DESTROY:
     {
-        // Graceful shutdown order: Stop Network -> Stop Injection -> Persist Config -> Terminate UI
         m_networkManager.Stop();
         m_networkManager.GetInputManager().GetInjectionManager().Shutdown();
         m_configManager.SaveConfig();

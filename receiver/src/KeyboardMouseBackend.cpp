@@ -10,8 +10,8 @@ bool KeyboardMouseBackend::Initialize()
 {
     std::lock_guard<std::mutex> lock(m_mutex);
     m_initialized = true;
-    m_previousState = {};
-    m_stats = {};
+    m_previousState = ControllerStateData{};
+    m_stats = InjectionStats{};
     return true;
 }
 
@@ -36,12 +36,13 @@ void KeyboardMouseBackend::ResetState()
     if (m_previousState.buttons & static_cast<uint32_t>(ControllerButton::DPAD_LEFT)) SendKeyboardInput('A', true);
     if (m_previousState.buttons & static_cast<uint32_t>(ControllerButton::DPAD_RIGHT)) SendKeyboardInput('D', true);
 
-    m_previousState = {};
+    m_previousState = ControllerStateData{};
 }
 
 void KeyboardMouseBackend::SendKeyboardInput(WORD vkCode, bool keyUp)
 {
-    INPUT input{};
+    INPUT input;
+    ZeroMemory(&input, sizeof(INPUT));
     input.type = INPUT_KEYBOARD;
     input.ki.wVk = vkCode;
     input.ki.dwFlags = keyUp ? KEYEVENTF_KEYUP : 0;
@@ -61,10 +62,11 @@ void KeyboardMouseBackend::SendMouseMotion(int dx, int dy)
 {
     if (dx == 0 && dy == 0) return;
 
-    INPUT input{};
+    INPUT input;
+    ZeroMemory(&input, sizeof(INPUT));
     input.type = INPUT_MOUSE;
-    input.mi.dx = dx;
-    input.mi.dy = dy;
+    input.mi.dx = static_cast<LONG>(dx);
+    input.mi.dy = static_cast<LONG>(dy);
     input.mi.dwFlags = MOUSEEVENTF_MOVE;
 
     if (SendInput(1, &input, sizeof(INPUT)) == 1)
@@ -80,7 +82,8 @@ void KeyboardMouseBackend::SendMouseMotion(int dx, int dy)
 
 void KeyboardMouseBackend::SendMouseButton(DWORD flags)
 {
-    INPUT input{};
+    INPUT input;
+    ZeroMemory(&input, sizeof(INPUT));
     input.type = INPUT_MOUSE;
     input.mi.dwFlags = flags;
 
