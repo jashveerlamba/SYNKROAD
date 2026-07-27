@@ -14,6 +14,7 @@
 #include <thread>
 #include <atomic>
 #include <cstdint>
+#include <vector>
 
 #include "NetworkProtocol.h"
 
@@ -43,6 +44,9 @@ struct DeviceSession
     uint32_t capabilities = 0;
     sockaddr_in clientAddr{};
     uint64_t connectedTimestamp = 0;
+    uint64_t lastHeartbeatTimestamp = 0;
+    uint32_t lastSequenceNumber = 0;
+    uint32_t lastMeasuredLatencyMs = 0;
     bool active = false;
 };
 
@@ -50,6 +54,7 @@ class NetworkManager
 {
 public:
     using StatusCallback = std::function<void(NetworkState state, const std::wstring& message)>;
+    using LatencyCallback = std::function<void(uint32_t latencyMs)>;
 
     NetworkManager() = default;
     ~NetworkManager();
@@ -67,7 +72,15 @@ public:
     void RejectConnection(HandshakeResult reason);
     void StartHandshake();
     void CompleteHandshake();
-    void Disconnect();
+    void DisconnectSession(const std::wstring& reason);
+
+    bool SendPacket(PacketType type, const uint8_t* payload, uint16_t payloadSize);
+    bool ReceivePacket(const uint8_t* buffer, size_t bufferSize, sockaddr_in& fromAddr);
+
+    void SendHeartbeat();
+    void ProcessHeartbeat();
+    void SendPing();
+    void HandlePong(const PingPongPacket& pong);
 
     bool IsInitialized() const;
     bool IsListening() const;
@@ -78,16 +91,21 @@ public:
     std::wstring GetLocalIPAddress() const;
     uint16_t GetListeningPort() const;
     NetworkState GetStatus() const;
+    uint32_t GetCurrentLatency() const;
 
     void SetStatusCallback(StatusCallback callback);
+    void SetLatencyCallback(LatencyCallback callback);
 
 private:
     void SetState(NetworkState newState, const std::wstring& message);
     void ListeningWorker();
     void DiscoveryWorker();
 
+    bool SerializePacket(PacketType type, const uint8_t* payload, uint16_t payloadSize, std::vector<uint8_t>& outBuffer);
+    bool ValidatePacket(const TransportHeader& header, const uint8_t* payload, uint16_t payloadSize);
+
     uint64_t GenerateSecureSessionID();
-    bool ValidatePacketHeader(const PacketHeader& header, PacketType expectedType, uint16_t expectedSize);
+    uint64_t GetCurrentTimestampMs() const;
 
 private:
     bool m_winsockInitialized = false;
@@ -95,9 +113,12 @@ private:
     SOCKET m_discoverySocket = INVALID_SOCKET;
     uint16_t m_listeningPort = 0;
     static constexpr uint16_t DISCOVERY_PORT = 9998;
+    static constexpr uint64_t HEARTBEAT_TIMEOUT_MS = 5000;
+    static constexpr uint64_t PING_INTERVAL_MS = 2000;
 
     NetworkState m_state = NetworkState::Uninitialized;
     StatusCallback m_statusCallback;
+    LatencyCallback m_latencyCallback;
     mutable std::mutex m_mutex;
 
     std::thread m_listenThread;
@@ -106,4 +127,7 @@ private:
     std::atomic<bool> m_discoveryRunning{ false };
 
     DeviceSession m_currentSession;
+    uint32_t m_outgoingSequenceNumber = 0;
+    uint32_t m_expectedSequenceNumber = 0;
+    uint64_t m_lastPingSentTime = 0;
 };

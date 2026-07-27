@@ -1,6 +1,7 @@
 #include "MainWindow.h"
 
 #define WM_USER_NETWORK_STATE_CHANGE (WM_USER + 101)
+#define WM_USER_LATENCY_UPDATE      (WM_USER + 102)
 
 struct NetworkStatusPayload
 {
@@ -55,12 +56,19 @@ bool MainWindow::Create(HINSTANCE instance, int cmdShow)
 
     m_uiManager.Create(m_window);
 
-    // Synchronize multi-threaded Network callbacks safely via PostMessage
+    // Thread-safe Network status updates via PostMessage
     m_networkManager.SetStatusCallback(
         [this](NetworkState state, const std::wstring& message)
         {
             auto* payload = new NetworkStatusPayload{ state, message };
             PostMessageW(m_window, WM_USER_NETWORK_STATE_CHANGE, 0, reinterpret_cast<LPARAM>(payload));
+        });
+
+    // Thread-safe Latency updates
+    m_networkManager.SetLatencyCallback(
+        [this](uint32_t latencyMs)
+        {
+            PostMessageW(m_window, WM_USER_LATENCY_UPDATE, static_cast<WPARAM>(latencyMs), 0);
         });
 
     if (m_networkManager.Initialize())
@@ -131,6 +139,7 @@ LRESULT MainWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
                 m_uiManager.LogInfo(payload->message);
                 m_uiManager.SetConnectionStatus(ConnectionStatus::Disconnected);
                 m_uiManager.SetNetworkInfo(m_networkManager.GetLocalIPAddress() + L":" + std::to_wstring(m_networkManager.GetListeningPort()));
+                m_uiManager.SetLatency(0);
                 break;
             case NetworkState::Connecting:
             case NetworkState::Handshaking:
@@ -149,11 +158,13 @@ LRESULT MainWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
                 m_uiManager.LogInfo(payload->message);
                 m_uiManager.SetConnectionStatus(ConnectionStatus::Disconnected);
                 m_uiManager.SetNetworkInfo(L"No Device");
+                m_uiManager.SetLatency(0);
                 break;
             case NetworkState::Error:
                 m_uiManager.LogError(payload->message);
                 m_uiManager.SetConnectionStatus(ConnectionStatus::Disconnected);
                 m_uiManager.SetNetworkInfo(L"Error");
+                m_uiManager.SetLatency(0);
                 break;
             default:
                 m_uiManager.LogInfo(payload->message);
@@ -161,6 +172,13 @@ LRESULT MainWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
             }
             delete payload;
         }
+        return 0;
+    }
+
+    case WM_USER_LATENCY_UPDATE:
+    {
+        uint32_t latencyMs = static_cast<uint32_t>(wParam);
+        m_uiManager.SetLatency(latencyMs);
         return 0;
     }
 

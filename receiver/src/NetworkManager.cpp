@@ -14,6 +14,12 @@ void NetworkManager::SetStatusCallback(StatusCallback callback)
     m_statusCallback = std::move(callback);
 }
 
+void NetworkManager::SetLatencyCallback(LatencyCallback callback)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_latencyCallback = std::move(callback);
+}
+
 void NetworkManager::SetState(NetworkState newState, const std::wstring& message)
 {
     StatusCallback cb;
@@ -27,6 +33,12 @@ void NetworkManager::SetState(NetworkState newState, const std::wstring& message
     {
         cb(newState, message);
     }
+}
+
+uint64_t NetworkManager::GetCurrentTimestampMs() const
+{
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
 }
 
 bool NetworkManager::Initialize()
@@ -203,7 +215,7 @@ void NetworkManager::DiscoveryWorker()
         if (bytesRecv > 0 && static_cast<size_t>(bytesRecv) >= sizeof(DiscoveryRequestPacket))
         {
             auto* req = reinterpret_cast<DiscoveryRequestPacket*>(buffer);
-            if (ValidatePacketHeader(req->header, PacketType::DiscoveryRequest, sizeof(DiscoveryRequestPacket)))
+            if (ValidatePacket(req->header, reinterpret_cast<const uint8_t*>(buffer) + sizeof(TransportHeader), req->header.payloadLength))
             {
                 SetState(GetStatus(), L"Android device discovered on network");
 
@@ -211,12 +223,18 @@ void NetworkManager::DiscoveryWorker()
                 resp.header.magic = SYNKROAD_MAGIC;
                 resp.header.protocolVersion = CURRENT_PROTOCOL_VERSION;
                 resp.header.type = PacketType::DiscoveryResponse;
-                resp.header.payloadSize = sizeof(DiscoveryResponsePacket) - sizeof(PacketHeader);
-                resp.timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
-                    std::chrono::system_clock::now().time_since_epoch()).count();
+                resp.header.sessionId = 0;
+                resp.header.sequenceNumber = 0;
+                resp.header.timestamp = GetCurrentTimestampMs();
+                resp.header.payloadLength = sizeof(DiscoveryResponsePacket) - sizeof(TransportHeader);
                 
                 strcpy_s(resp.receiverName, "SYNKROAD Receiver");
                 resp.listeningPort = m_listeningPort;
+
+                resp.header.crc32 = NetworkUtils::CalculateCRC32(
+                    reinterpret_cast<const uint8_t*>(&resp) + offsetof(TransportHeader, payloadLength),
+                    sizeof(DiscoveryResponsePacket) - offsetof(TransportHeader, payloadLength)
+                );
 
                 sendto(m_discoverySocket, reinterpret_cast<const char*>(&resp), sizeof(resp), 0,
                        reinterpret_cast<sockaddr*>(&clientAddr), clientLen);
@@ -226,33 +244,89 @@ void NetworkManager::DiscoveryWorker()
     }
 }
 
+bool NetworkManager::SerializePacket(PacketType type, const uint8_t* payload, uint16_t payloadSize, std::vector<uint8_t>& outBuffer)
+{
+    size_t totalSize = sizeof(TransportHeader) + payloadSize;
+    if (totalSize > MAX_PACKET_SIZE) return false;
+
+    outBuffer.resize(totalSize);
+    auto* header = reinterpret_cast<TransportHeader*>(outBuffer.data());
+    header->magic = SYNKROAD_MAGIC;
+    header->protocolVersion = CURRENT_PROTOCOL_VERSION;
+    header->type = type;
+    header->sessionId = m_currentSession.sessionId;
+    header->sequenceNumber = ++m_outgoingSequenceNumber;
+    header->timestamp = GetCurrentTimestampMs();
+    header->payloadLength = payloadSize;
+
+    if (payload && payloadSize > 0)
+    {
+        std::copy(payload, payload + payloadSize, outBuffer.data() + sizeof(TransportHeader));
+    }
+
+    header->crc32 = NetworkUtils::CalculateCRC32(
+        outBuffer.data() + offsetof(TransportHeader, payloadLength),
+        totalSize - offsetof(TransportHeader, payloadLength)
+    );
+
+    return true;
+}
+
+bool NetworkManager::ValidatePacket(const TransportHeader& header, const uint8_t* payload, uint16_t payloadSize)
+{
+    if (header.magic != SYNKROAD_MAGIC) return false;
+    if (header.protocolVersion != CURRENT_PROTOCOL_VERSION) return false;
+    if (header.payloadLength != payloadSize) return false;
+
+    std::vector<uint8_t> checkBuf(sizeof(uint16_t) + payloadSize);
+    *reinterpret_cast<uint16_t*>(checkBuf.data()) = header.payloadLength;
+    if (payload && payloadSize > 0)
+    {
+        std::copy(payload, payload + payloadSize, checkBuf.data() + sizeof(uint16_t));
+    }
+
+    uint32_t computedCrc = NetworkUtils::CalculateCRC32(checkBuf.data(), checkBuf.size());
+    return computedCrc == header.crc32;
+}
+
+bool NetworkManager::SendPacket(PacketType type, const uint8_t* payload, uint16_t payloadSize)
+{
+    std::vector<uint8_t> packetData;
+    if (!SerializePacket(type, payload, payloadSize, packetData)) return false;
+
+    int sent = sendto(m_listenSocket, reinterpret_cast<const char*>(packetData.data()),
+                      static_cast<int>(packetData.size()), 0,
+                      reinterpret_cast<const sockaddr*>(&m_currentSession.clientAddr),
+                      sizeof(m_currentSession.clientAddr));
+    return sent != SOCKET_ERROR;
+}
+
 void NetworkManager::ListeningWorker()
 {
-    char buffer[1024];
+    std::vector<uint8_t> buffer(MAX_PACKET_SIZE);
     sockaddr_in clientAddr{};
     int clientLen = sizeof(clientAddr);
+    uint64_t lastPingCheckTime = 0;
 
     while (m_running)
     {
-        int bytesRecv = recvfrom(m_listenSocket, buffer, sizeof(buffer), 0, reinterpret_cast<sockaddr*>(&clientAddr), &clientLen);
-        if (bytesRecv > 0)
+        int bytesRecv = recvfrom(m_listenSocket, reinterpret_cast<char*>(buffer.data()), static_cast<int>(buffer.size()), 0, reinterpret_cast<sockaddr*>(&clientAddr), &clientLen);
+        uint64_t now = GetCurrentTimestampMs();
+
+        if (bytesRecv > 0 && static_cast<size_t>(bytesRecv) >= sizeof(TransportHeader))
         {
-            if (static_cast<size_t>(bytesRecv) >= sizeof(HandshakeRequestPacket))
+            auto* header = reinterpret_cast<TransportHeader*>(buffer.data());
+            const uint8_t* payload = buffer.data() + sizeof(TransportHeader);
+            uint16_t payloadSize = static_cast<uint16_t>(bytesRecv - sizeof(TransportHeader));
+
+            if (ValidatePacket(*header, payload, payloadSize))
             {
-                auto* req = reinterpret_cast<HandshakeRequestPacket*>(buffer);
-                if (req->header.type == PacketType::HandshakeRequest)
+                if (header->type == PacketType::HandshakeRequest)
                 {
                     SetState(NetworkState::Connecting, L"Connection request received");
-                    
-                    if (!ValidatePacketHeader(req->header, PacketType::HandshakeRequest, sizeof(HandshakeRequestPacket)))
-                    {
-                        RejectConnection(HandshakeResult::VersionMismatch);
-                        continue;
-                    }
-
                     SetState(NetworkState::Handshaking, L"Handshake started");
 
-                    // Validation & Session Generation
+                    auto* req = reinterpret_cast<const HandshakeRequestPacket*>(buffer.data());
                     uint64_t newSessionId = GenerateSecureSessionID();
                     {
                         std::lock_guard<std::mutex> lock(m_mutex);
@@ -271,56 +345,117 @@ void NetworkManager::ListeningWorker()
                         m_currentSession.appVersion = wAppVer;
                         m_currentSession.capabilities = req->capabilityFlags;
                         m_currentSession.clientAddr = clientAddr;
-                        m_currentSession.connectedTimestamp = req->timestamp;
+                        m_currentSession.connectedTimestamp = now;
+                        m_currentSession.lastHeartbeatTimestamp = now;
                         m_currentSession.active = true;
+                        m_expectedSequenceNumber = header->sequenceNumber + 1;
                     }
 
                     HandshakeResponsePacket resp{};
-                    resp.header.magic = SYNKROAD_MAGIC;
-                    resp.header.protocolVersion = CURRENT_PROTOCOL_VERSION;
-                    resp.header.type = PacketType::HandshakeResponse;
-                    resp.header.payloadSize = sizeof(HandshakeResponsePacket) - sizeof(PacketHeader);
-                    resp.timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
-                        std::chrono::system_clock::now().time_since_epoch()).count();
                     resp.result = HandshakeResult::Success;
                     resp.sessionId = newSessionId;
                     strcpy_s(resp.receiverVersion, "1.0.0");
                     resp.capabilityFlags = req->capabilityFlags;
-
-                    // Security challenge seed reflection for placeholder integrity
                     std::copy(std::begin(req->challengeSeed), std::end(req->challengeSeed), std::begin(resp.challengeResponse));
 
-                    sendto(m_listenSocket, reinterpret_cast<const char*>(&resp), sizeof(resp), 0,
-                           reinterpret_cast<sockaddr*>(&clientAddr), clientLen);
-
-                    SetState(NetworkState::Connected, L"Handshake successful - Session established");
+                    SendPacket(PacketType::HandshakeResponse, reinterpret_cast<const uint8_t*>(&resp) + sizeof(TransportHeader), sizeof(HandshakeResponsePacket) - sizeof(TransportHeader));
+                    SetState(NetworkState::Connected, L"Session established - Transport active");
                 }
-            }
-            else if (static_cast<size_t>(bytesRecv) >= sizeof(DisconnectPacket))
-            {
-                auto* disc = reinterpret_cast<DisconnectPacket*>(buffer);
-                if (disc->header.type == PacketType::DisconnectNotice && disc->sessionId == GetSessionID())
+                else if (IsConnected() && header->sessionId == GetSessionID())
                 {
-                    Disconnect();
+                    m_currentSession.lastHeartbeatTimestamp = now;
+
+                    if (header->type == PacketType::Heartbeat)
+                    {
+                        ProcessHeartbeat();
+                    }
+                    else if (header->type == PacketType::Ping)
+                    {
+                        PingPongPacket pong{};
+                        pong.pingTimestamp = header->timestamp;
+                        SendPacket(PacketType::Pong, reinterpret_cast<const uint8_t*>(&pong) + sizeof(TransportHeader), sizeof(PingPongPacket) - sizeof(TransportHeader));
+                    }
+                    else if (header->type == PacketType::Pong)
+                    {
+                        if (payloadSize >= (sizeof(PingPongPacket) - sizeof(TransportHeader)))
+                        {
+                            const auto* pong = reinterpret_cast<const PingPongPacket*>(buffer.data());
+                            HandlePong(*pong);
+                        }
+                    }
+                    else if (header->type == PacketType::DisconnectNotice)
+                    {
+                        DisconnectSession(L"Client requested disconnect");
+                    }
                 }
             }
         }
+
+        if (IsConnected())
+        {
+            if (now - m_currentSession.lastHeartbeatTimestamp > HEARTBEAT_TIMEOUT_MS)
+            {
+                DisconnectSession(L"Session timeout - Heartbeat expired");
+            }
+            else if (now - lastPingCheckTime > PING_INTERVAL_MS)
+            {
+                SendPing();
+                lastPingCheckTime = now;
+            }
+        }
+
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+}
+
+void NetworkManager::SendHeartbeat()
+{
+    SendPacket(PacketType::Heartbeat, nullptr, 0);
+}
+
+void NetworkManager::ProcessHeartbeat()
+{
+    // Heartbeat received & timestamp refreshed
+}
+
+void NetworkManager::SendPing()
+{
+    PingPongPacket ping{};
+    m_lastPingSentTime = GetCurrentTimestampMs();
+    ping.pingTimestamp = m_lastPingSentTime;
+    SendPacket(PacketType::Ping, reinterpret_cast<const uint8_t*>(&ping) + sizeof(TransportHeader), sizeof(PingPongPacket) - sizeof(TransportHeader));
+}
+
+void NetworkManager::HandlePong(const PingPongPacket& pong)
+{
+    uint64_t now = GetCurrentTimestampMs();
+    uint32_t latency = static_cast<uint32_t>(now - pong.pingTimestamp);
+
+    LatencyCallback cb;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_currentSession.lastMeasuredLatencyMs = latency;
+        cb = m_latencyCallback;
+    }
+
+    if (cb)
+    {
+        cb(latency);
     }
 }
 
 void NetworkManager::RejectConnection(HandshakeResult reason)
 {
-    SetState(NetworkState::Error, L"Handshake rejected (Reason: " + std::to_wstring(static_cast<int>(reason)) + L")");
+    SetState(NetworkState::Error, L"Handshake rejected (Reason code: " + std::to_wstring(static_cast<int>(reason)) + L")");
 }
 
-void NetworkManager::Disconnect()
+void NetworkManager::DisconnectSession(const std::wstring& reason)
 {
     std::lock_guard<std::mutex> lock(m_mutex);
     if (m_currentSession.active)
     {
         m_currentSession.active = false;
-        SetState(NetworkState::Listening, L"Device disconnected");
+        SetState(NetworkState::Listening, L"Device disconnected: " + reason);
     }
 }
 
@@ -333,15 +468,6 @@ uint64_t NetworkManager::GenerateSecureSessionID()
         sid = static_cast<uint64_t>(std::chrono::high_resolution_clock::now().time_since_epoch().count());
     }
     return sid;
-}
-
-bool NetworkManager::ValidatePacketHeader(const PacketHeader& header, PacketType expectedType, uint16_t expectedSize)
-{
-    if (header.magic != SYNKROAD_MAGIC) return false;
-    if (header.protocolVersion != CURRENT_PROTOCOL_VERSION) return false;
-    if (header.type != expectedType) return false;
-    if (header.payloadSize != (expectedSize - sizeof(PacketHeader))) return false;
-    return true;
 }
 
 bool NetworkManager::IsInitialized() const
@@ -384,6 +510,12 @@ NetworkState NetworkManager::GetStatus() const
 {
     std::lock_guard<std::mutex> lock(m_mutex);
     return m_state;
+}
+
+uint32_t NetworkManager::GetCurrentLatency() const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_currentSession.lastMeasuredLatencyMs;
 }
 
 std::wstring NetworkManager::GetLocalIPAddress() const
