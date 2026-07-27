@@ -5,7 +5,7 @@ project(SYNKROADReceiver LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-add_definitions(-DUNICODE -D_UNICODE)
+add_definitions(-DUNICODE -D_UNICODE -DWIN32_LEAN_AND_MEAN)
 
 include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/include

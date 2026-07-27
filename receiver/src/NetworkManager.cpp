@@ -1,4 +1,5 @@
 #include "NetworkManager.h"
+#include <algorithm>
 
 NetworkManager::~NetworkManager()
 {
@@ -175,6 +176,11 @@ std::wstring NetworkManager::GetLocalIPAddress() const
     freeaddrinfo(res);
 
     int size_needed = MultiByteToWideChar(CP_UTF8, 0, ipStr, -1, NULL, 0);
+    if (size_needed <= 1)
+    {
+        return L"127.0.0.1";
+    }
+
     std::wstring wstr(size_needed - 1, 0);
     MultiByteToWideChar(CP_UTF8, 0, ipStr, -1, &wstr[0], size_needed);
 
