@@ -1,5 +1,11 @@
 #include "UIManager.h"
 
+#include <richedit.h>
+#include <chrono>
+#include <ctime>
+#include <iomanip>
+#include <sstream>
+
 UIManager::~UIManager() = default;
 
 ATOM UIManager::RegisterContentPanelClass(HINSTANCE instance)
@@ -84,18 +90,15 @@ LRESULT CALLBACK UIManager::StatusBarProc(HWND hwnd, UINT message, WPARAM wParam
         RECT rc;
         GetClientRect(hwnd, &rc);
 
-        // Background
         HBRUSH bgBrush = CreateSolidBrush(RGB(238, 240, 243));
         FillRect(hdc, &rc, bgBrush);
         DeleteObject(bgBrush);
 
-        // Top border separator line
         HPEN borderPen = CreatePen(PS_SOLID, 1, RGB(210, 214, 220));
         HPEN oldPen = static_cast<HPEN>(SelectObject(hdc, borderPen));
         MoveToEx(hdc, 0, 0, nullptr);
         LineTo(hdc, rc.right, 0);
 
-        // Set up font and text parameters
         SetBkMode(hdc, TRANSPARENT);
         SetTextColor(hdc, RGB(90, 95, 105));
 
@@ -109,7 +112,6 @@ LRESULT CALLBACK UIManager::StatusBarProc(HWND hwnd, UINT message, WPARAM wParam
 
         if (manager)
         {
-            // Section metrics
             const int totalWidth = rc.right - rc.left;
             const int sectionWidth = totalWidth / 5;
             const int textMarginX = 12;
@@ -130,7 +132,6 @@ LRESULT CALLBACK UIManager::StatusBarProc(HWND hwnd, UINT message, WPARAM wParam
                 RECT itemRc{ xStart + textMarginX, 0, xEnd - textMarginX, rc.bottom };
                 DrawTextW(hdc, items[i].c_str(), -1, &itemRc, DT_SINGLELINE | DT_VCENTER | DT_LEFT | DT_END_ELLIPSIS);
 
-                // Vertical separator line between sections
                 if (i < 4)
                 {
                     MoveToEx(hdc, xEnd, 4, nullptr);
@@ -152,10 +153,78 @@ LRESULT CALLBACK UIManager::StatusBarProc(HWND hwnd, UINT message, WPARAM wParam
     return DefWindowProcW(hwnd, message, wParam, lParam);
 }
 
+std::wstring UIManager::GetFormattedTimestamp() const
+{
+    auto now = std::chrono::system_clock::now();
+    auto in_time_t = std::chrono::system_clock::to_time_t(now);
+    
+    std::tm buf{};
+    localtime_s(&buf, &in_time_t);
+
+    std::wstringstream ss;
+    ss << std::setfill(L'0') 
+       << std::setw(2) << buf.tm_hour << L":"
+       << std::setw(2) << buf.tm_min << L":"
+       << std::setw(2) << buf.tm_sec;
+
+    return ss.str();
+}
+
+void UIManager::AppendLogToRichEdit(const LogEntry& entry)
+{
+    if (!m_logRichEdit) return;
+
+    // Move insertion to the end
+    CHARRANGE cr{ -1, -1 };
+    SendMessageW(m_logRichEdit, EM_EXSETSEL, 0, reinterpret_cast<LPARAM>(&cr));
+
+    // Determine Prefix text and Color
+    std::wstring levelStr;
+    COLORREF color = RGB(30, 30, 30);
+
+    switch (entry.level)
+    {
+    case LogLevel::Debug:
+        levelStr = L"DEBUG";
+        color = RGB(120, 120, 120); // Gray
+        break;
+    case LogLevel::Info:
+        levelStr = L"INFO ";
+        color = RGB(33, 115, 70);   // Dark Green
+        break;
+    case LogLevel::Warning:
+        levelStr = L"WARN ";
+        color = RGB(217, 119, 6);   // Dark Amber/Orange
+        break;
+    case LogLevel::Error:
+        levelStr = L"ERROR";
+        color = RGB(220, 38, 38);   // Red
+        break;
+    }
+
+    std::wstring line = L"[" + entry.timestamp + L"] " + levelStr + L"  " + entry.message + L"\r\n";
+
+    CHARFORMAT2W cf{};
+    cf.cbSize = sizeof(CHARFORMAT2W);
+    cf.dwMask = CFM_COLOR | CFM_FACE | CFM_SIZE;
+    cf.crTextColor = color;
+    cf.yHeight = 180; // 9pt
+    wcscpy_s(cf.szFaceName, L"Consolas");
+
+    SendMessageW(m_logRichEdit, EM_SETCHARFORMAT, SCF_SELECTION, reinterpret_cast<LPARAM>(&cf));
+    SendMessageW(m_logRichEdit, EM_REPLACESEL, FALSE, reinterpret_cast<LPARAM>(line.c_str()));
+
+    // Auto-scroll to the bottom
+    SendMessageW(m_logRichEdit, WM_VSCROLL, SB_BOTTOM, 0);
+}
+
 bool UIManager::Create(HWND parent)
 {
     m_parent = parent;
     HINSTANCE instance = GetModuleHandleW(nullptr);
+
+    // Load Msftedit.dll / RichEdit v4.1 or fallback to RichEd20.dll
+    LoadLibraryW(L"Msftedit.dll");
 
     RegisterContentPanelClass(instance);
     RegisterStatusBarClass(instance);
@@ -189,13 +258,46 @@ bool UIManager::Create(HWND parent)
             SetConnectionStatus(connected ? ConnectionStatus::Connected : ConnectionStatus::Disconnected);
         });
 
-    // Content Panel Window Container
+    // Content Panel Container
     m_contentPanel = CreateWindowExW(
         0, CONTENT_PANEL_CLASS, L"",
         WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN,
         0, 0, 0, 0, m_parent, nullptr, instance, nullptr);
 
     if (!m_contentPanel) return false;
+
+    // Log Control (RichEdit inside Content Panel)
+    m_logRichEdit = CreateWindowExW(
+        WS_EX_CLIENTEDGE,
+        MSFTEDIT_CLASS,
+        L"",
+        WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY,
+        0, 0, 0, 0,
+        m_contentPanel,
+        nullptr,
+        instance,
+        nullptr);
+
+    if (!m_logRichEdit)
+    {
+        // Fallback to RichEdit20W if Msftedit isn't available
+        m_logRichEdit = CreateWindowExW(
+            WS_EX_CLIENTEDGE,
+            L"RichEdit20W",
+            L"",
+            WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY,
+            0, 0, 0, 0,
+            m_contentPanel,
+            nullptr,
+            instance,
+            nullptr);
+    }
+
+    if (m_logRichEdit)
+    {
+        // Set background color to crisp off-white
+        SendMessageW(m_logRichEdit, EM_SETBKGNDCOLOR, 0, RGB(252, 252, 253));
+    }
 
     // Status Bar Window Container
     m_statusBar = CreateWindowExW(
@@ -209,6 +311,9 @@ bool UIManager::Create(HWND parent)
 
     SetConnectionStatus(ConnectionStatus::Disconnected);
     UpdateLayout();
+
+    // Initial startup log message
+    LogInfo(L"Receiver started");
 
     return true;
 }
@@ -224,14 +329,17 @@ void UIManager::SetConnectionStatus(ConnectionStatus status)
     case ConnectionStatus::Disconnected:
         SetWindowTextW(m_statusLabel, L"Disconnected");
         SetConnectionStateText(L"Disconnected");
+        LogInfo(L"Connection state changed: Disconnected");
         break;
     case ConnectionStatus::Connecting:
         SetWindowTextW(m_statusLabel, L"Connecting...");
         SetConnectionStateText(L"Connecting");
+        LogInfo(L"Connection state changed: Connecting...");
         break;
     case ConnectionStatus::Connected:
         SetWindowTextW(m_statusLabel, L"Connected");
         SetConnectionStateText(L"Connected");
+        LogInfo(L"Connection state changed: Connected");
         break;
     }
 
@@ -266,6 +374,55 @@ void UIManager::SetLatency(int latencyMs)
 {
     m_strLatency = (latencyMs < 0) ? L"-- ms" : (std::to_wstring(latencyMs) + L" ms");
     if (m_statusBar) InvalidateRect(m_statusBar, nullptr, TRUE);
+}
+
+void UIManager::LogInfo(const std::wstring& message)
+{
+    Log(LogLevel::Info, message);
+}
+
+void UIManager::LogWarning(const std::wstring& message)
+{
+    Log(LogLevel::Warning, message);
+}
+
+void UIManager::LogError(const std::wstring& message)
+{
+    Log(LogLevel::Error, message);
+}
+
+void UIManager::LogDebug(const std::wstring& message)
+{
+#if defined(_DEBUG) || !defined(NDEBUG)
+    Log(LogLevel::Debug, message);
+#else
+    (void)message;
+#endif
+}
+
+void UIManager::Log(LogLevel level, const std::wstring& message)
+{
+    LogEntry entry{ level, GetFormattedTimestamp(), message };
+
+    {
+        std::lock_guard<std::mutex> lock(m_logMutex);
+        m_logs.push_back(entry);
+    }
+
+    AppendLogToRichEdit(entry);
+}
+
+void UIManager::ClearLog()
+{
+    {
+        std::lock_guard<std::mutex> lock(m_logMutex);
+        m_logs.clear();
+    }
+
+    if (m_logRichEdit)
+    {
+        SetWindowTextW(m_logRichEdit, L"");
+    }
 }
 
 void UIManager::UpdateLayout()
@@ -308,12 +465,31 @@ void UIManager::UpdateLayout()
     }
 
     // 5. Position Central Main Content Panel
+    int contentY = TOP_BAR_TOTAL_HEIGHT;
+    int contentHeight = statusBarY - contentY;
+    if (contentHeight < 0) contentHeight = 0;
+
     if (m_contentPanel)
     {
-        int contentY = TOP_BAR_TOTAL_HEIGHT;
-        int contentHeight = statusBarY - contentY;
-        if (contentHeight < 0) contentHeight = 0;
-
         SetWindowPos(m_contentPanel, nullptr, 0, contentY, clientWidth, contentHeight, SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+
+    // 6. Position Logging Control within Content Panel
+    if (m_logRichEdit)
+    {
+        int logWidth = clientWidth - (2 * CONTENT_MARGIN);
+        int logHeight = contentHeight - (2 * CONTENT_MARGIN);
+
+        if (logWidth < 0) logWidth = 0;
+        if (logHeight < 0) logHeight = 0;
+
+        SetWindowPos(
+            m_logRichEdit,
+            nullptr,
+            CONTENT_MARGIN,
+            CONTENT_MARGIN,
+            logWidth,
+            logHeight,
+            SWP_NOZORDER | SWP_NOACTIVATE);
     }
 }
