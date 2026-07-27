@@ -1,5 +1,13 @@
 #include "MainWindow.h"
 
+#define WM_USER_NETWORK_STATE_CHANGE (WM_USER + 101)
+
+struct NetworkStatusPayload
+{
+    NetworkState state;
+    std::wstring message;
+};
+
 MainWindow::MainWindow() = default;
 
 MainWindow::~MainWindow()
@@ -45,43 +53,16 @@ bool MainWindow::Create(HINSTANCE instance, int cmdShow)
         return false;
     }
 
-    // Initialize UI Layout & Controls
     m_uiManager.Create(m_window);
 
-    // Bind NetworkManager status updates to UI Manager
+    // Synchronize multi-threaded Network callbacks safely via PostMessage
     m_networkManager.SetStatusCallback(
         [this](NetworkState state, const std::wstring& message)
         {
-            switch (state)
-            {
-            case NetworkState::Initializing:
-                m_uiManager.LogInfo(message);
-                break;
-            case NetworkState::Ready:
-                m_uiManager.LogInfo(message);
-                m_uiManager.SetNetworkInfo(L"Ready (" + m_networkManager.GetLocalIPAddress() + L")");
-                break;
-            case NetworkState::Listening:
-                m_uiManager.LogInfo(message);
-                m_uiManager.SetConnectionStatus(ConnectionStatus::Connected);
-                m_uiManager.SetNetworkInfo(m_networkManager.GetLocalIPAddress() + L":" + std::to_wstring(m_networkManager.GetListeningPort()));
-                break;
-            case NetworkState::Stopped:
-                m_uiManager.LogInfo(message);
-                m_uiManager.SetConnectionStatus(ConnectionStatus::Disconnected);
-                m_uiManager.SetNetworkInfo(L"No Device");
-                break;
-            case NetworkState::Error:
-                m_uiManager.LogError(message);
-                m_uiManager.SetConnectionStatus(ConnectionStatus::Disconnected);
-                m_uiManager.SetNetworkInfo(L"Error");
-                break;
-            default:
-                break;
-            }
+            auto* payload = new NetworkStatusPayload{ state, message };
+            PostMessageW(m_window, WM_USER_NETWORK_STATE_CHANGE, 0, reinterpret_cast<LPARAM>(payload));
         });
 
-    // Initialize Network Manager and start listening on configured port
     if (m_networkManager.Initialize())
     {
         m_networkManager.StartListening(m_configManager.GetListeningPort());
@@ -132,6 +113,57 @@ LRESULT MainWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
 {
     switch (message)
     {
+    case WM_USER_NETWORK_STATE_CHANGE:
+    {
+        auto* payload = reinterpret_cast<NetworkStatusPayload*>(lParam);
+        if (payload)
+        {
+            switch (payload->state)
+            {
+            case NetworkState::Initializing:
+                m_uiManager.LogInfo(payload->message);
+                break;
+            case NetworkState::Ready:
+                m_uiManager.LogInfo(payload->message);
+                m_uiManager.SetNetworkInfo(L"Ready (" + m_networkManager.GetLocalIPAddress() + L")");
+                break;
+            case NetworkState::Listening:
+                m_uiManager.LogInfo(payload->message);
+                m_uiManager.SetConnectionStatus(ConnectionStatus::Disconnected);
+                m_uiManager.SetNetworkInfo(m_networkManager.GetLocalIPAddress() + L":" + std::to_wstring(m_networkManager.GetListeningPort()));
+                break;
+            case NetworkState::Connecting:
+            case NetworkState::Handshaking:
+                m_uiManager.LogInfo(payload->message);
+                m_uiManager.SetConnectionStatus(ConnectionStatus::Connecting);
+                break;
+            case NetworkState::Connected:
+            {
+                auto dev = m_networkManager.GetConnectedDevice();
+                m_uiManager.LogInfo(payload->message + L" [" + dev.deviceName + L"]");
+                m_uiManager.SetConnectionStatus(ConnectionStatus::Connected);
+                m_uiManager.SetNetworkInfo(dev.deviceName + L" (Session: " + std::to_wstring(dev.sessionId) + L")");
+                break;
+            }
+            case NetworkState::Stopped:
+                m_uiManager.LogInfo(payload->message);
+                m_uiManager.SetConnectionStatus(ConnectionStatus::Disconnected);
+                m_uiManager.SetNetworkInfo(L"No Device");
+                break;
+            case NetworkState::Error:
+                m_uiManager.LogError(payload->message);
+                m_uiManager.SetConnectionStatus(ConnectionStatus::Disconnected);
+                m_uiManager.SetNetworkInfo(L"Error");
+                break;
+            default:
+                m_uiManager.LogInfo(payload->message);
+                break;
+            }
+            delete payload;
+        }
+        return 0;
+    }
+
     case WM_SIZE:
         return 0;
 

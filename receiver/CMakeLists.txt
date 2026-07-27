@@ -22,5 +22,6 @@ add_executable(SYNKROADReceiver WIN32
 
 target_link_libraries(SYNKROADReceiver PRIVATE
     ws2_32
+    bcrypt
     comctl32
 )
