@@ -133,7 +133,6 @@ LRESULT MainWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
     switch (message)
     {
     case WM_SIZE:
-        m_uiManager.Resize(LOWORD(lParam), HIWORD(lParam));
         return 0;
 
     case WM_DESTROY:
