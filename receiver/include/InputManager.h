@@ -1,33 +1,51 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <functional>
-#include <cstdint>
-
-#include "NetworkProtocol.h"
+#include <mutex>
 #include "ControllerState.h"
+#include "InputInjectionManager.h"
+
+struct InputStatistics
+{
+    uint64_t totalPacketsReceived = 0;
+    uint64_t validPacketsProcessed = 0;
+    uint64_t droppedPackets = 0;
+    uint64_t outOfOrderPackets = 0;
+    uint32_t packetsPerSecond = 0;
+};
 
 class InputManager
 {
 public:
     using LogCallback = std::function<void(const std::wstring& message, bool isError)>;
 
-    InputManager() = default;
+    InputManager();
+    ~InputManager() = default;
 
-    bool ProcessInputPacket(const uint8_t* buffer, size_t size, uint64_t activeSessionId);
-    bool ValidateInputPacket(const TransportHeader& header, const ControllerInputPayload& payload, size_t totalSize, uint64_t activeSessionId);
+    bool ProcessInputPacket(const uint8_t* buffer, size_t size, uint64_t currentSessionId);
+    void ResetPipeline();
 
-    ControllerStateData GetControllerState() const;
+    ControllerStateData GetCurrentState() const;
     InputStatistics GetInputStatistics() const;
-    void ResetControllerState();
+    InputInjectionManager& GetInjectionManager() { return m_injectionManager; }
 
     void SetLogCallback(LogCallback callback);
 
 private:
-    ControllerState m_controllerState;
-    uint32_t m_lastSequenceNumber = 0;
-    LogCallback m_logCallback;
+    bool ValidatePacketHeader(const uint8_t* buffer, size_t size, uint64_t currentSessionId);
+    void UpdatePacketRate();
 
-    static constexpr uint16_t SUPPORTED_PROFILE_ID = 0x0001;
-    static constexpr uint8_t SUPPORTED_LAYOUT_VERSION = 0x01;
+private:
+    ControllerState m_controllerState;
+    InputInjectionManager m_injectionManager;
+    InputStatistics m_stats{};
+    uint32_t m_lastSequenceNumber = 0;
+    
+    uint32_t m_packetsInCurrentSecond = 0;
+    uint64_t m_lastRateCheckTimestamp = 0;
+
+    LogCallback m_logCallback;
+    mutable std::mutex m_mutex;
 };

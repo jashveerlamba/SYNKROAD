@@ -1,99 +1,107 @@
 #include "InputManager.h"
+#include "NetworkProtocol.h"
 #include <chrono>
+
+InputManager::InputManager()
+{
+    m_injectionManager.Initialize();
+}
 
 void InputManager::SetLogCallback(LogCallback callback)
 {
-    m_logCallback = std::move(callback);
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_logCallback = callback;
+    m_injectionManager.SetLogCallback(callback);
 }
 
-bool InputManager::ValidateInputPacket(const TransportHeader& header, const ControllerInputPayload& payload, size_t totalSize, uint64_t activeSessionId)
+void InputManager::ResetPipeline()
 {
-    if (totalSize < sizeof(TransportHeader) + sizeof(ControllerInputPayload))
-    {
-        m_controllerState.RecordInvalidPacket();
-        if (m_logCallback) m_logCallback(L"Invalid input packet: Oversized or payload truncated", true);
-        return false;
-    }
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_controllerState.Reset();
+    m_injectionManager.ResetInjectedState();
+    m_stats = {};
+    m_lastSequenceNumber = 0;
+}
 
-    if (header.sessionId != activeSessionId)
-    {
-        m_controllerState.RecordInvalidPacket();
-        if (m_logCallback) m_logCallback(L"Invalid input packet: Session ID mismatch", true);
-        return false;
-    }
+bool InputManager::ValidatePacketHeader(const uint8_t* buffer, size_t size, uint64_t currentSessionId)
+{
+    if (!buffer || size < sizeof(TransportHeader) + sizeof(ControllerInputPayload)) return false;
 
-    if (payload.profileId != SUPPORTED_PROFILE_ID)
-    {
-        m_controllerState.RecordInvalidPacket();
-        if (m_logCallback) m_logCallback(L"Invalid input packet: Profile ID mismatch (" + std::to_wstring(payload.profileId) + L")", true);
-        return false;
-    }
-
-    if (payload.layoutVersion != SUPPORTED_LAYOUT_VERSION)
-    {
-        m_controllerState.RecordInvalidPacket();
-        if (m_logCallback) m_logCallback(L"Invalid input packet: Unsupported layout version (" + std::to_wstring(payload.layoutVersion) + L")", true);
-        return false;
-    }
+    auto* header = reinterpret_cast<const TransportHeader*>(buffer);
+    if (header->magic != SYNKROAD_MAGIC) return false;
+    if (header->type != PacketType::ControllerInput) return false;
+    if (header->sessionId != currentSessionId) return false;
 
     return true;
 }
 
-bool InputManager::ProcessInputPacket(const uint8_t* buffer, size_t size, uint64_t activeSessionId)
+void InputManager::UpdatePacketRate()
 {
-    auto startTime = std::chrono::high_resolution_clock::now();
+    auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
 
-    if (!buffer || size < sizeof(TransportHeader) + sizeof(ControllerInputPayload))
+    m_packetsInCurrentSecond++;
+    if (now - m_lastRateCheckTimestamp >= 1000)
     {
-        m_controllerState.RecordInvalidPacket();
+        m_stats.packetsPerSecond = m_packetsInCurrentSecond;
+        m_packetsInCurrentSecond = 0;
+        m_lastRateCheckTimestamp = now;
+    }
+}
+
+bool InputManager::ProcessInputPacket(const uint8_t* buffer, size_t size, uint64_t currentSessionId)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_stats.totalPacketsReceived++;
+
+    if (!ValidatePacketHeader(buffer, size, currentSessionId))
+    {
+        m_stats.droppedPackets++;
         return false;
     }
 
-    const auto* header = reinterpret_cast<const TransportHeader*>(buffer);
-    const auto* payload = reinterpret_cast<const ControllerInputPayload*>(buffer + sizeof(TransportHeader));
-
-    if (!ValidateInputPacket(*header, *payload, size, activeSessionId))
+    auto* header = reinterpret_cast<const TransportHeader*>(buffer);
+    if (m_lastSequenceNumber != 0 && header->sequenceNumber <= m_lastSequenceNumber)
     {
-        return false;
-    }
-
-    // Sequence & Duplicate check
-    if (header->sequenceNumber <= m_lastSequenceNumber && m_lastSequenceNumber != 0)
-    {
-        if (header->sequenceNumber == m_lastSequenceNumber)
-        {
-            m_controllerState.RecordDuplicatePacket();
-        }
-        else
-        {
-            m_controllerState.RecordDroppedPacket(); // Out of order packet
-        }
+        m_stats.outOfOrderPackets++;
+        m_stats.droppedPackets++;
         return false;
     }
 
     m_lastSequenceNumber = header->sequenceNumber;
 
-    m_controllerState.UpdateState(*payload, header->sequenceNumber, header->timestamp);
+    auto* payload = reinterpret_cast<const ControllerInputPayload*>(buffer + sizeof(TransportHeader));
+    
+    ControllerStateData newState{};
+    newState.buttons = payload->buttons;
+    newState.leftTrigger = payload->leftTrigger;
+    newState.rightTrigger = payload->rightTrigger;
+    newState.leftStickX = payload->leftStickX;
+    newState.leftStickY = payload->leftStickY;
+    newState.rightStickX = payload->rightStickX;
+    newState.rightStickY = payload->rightStickY;
+    newState.steeringAngle = payload->steeringAngle;
+    newState.accelPedal = payload->accelPedal;
+    newState.brakePedal = payload->brakePedal;
 
-    auto endTime = std::chrono::high_resolution_clock::now();
-    double durationUs = std::chrono::duration<double, std::micro>(endTime - startTime).count();
-    m_controllerState.RecordProcessingTime(durationUs);
+    m_controllerState.UpdateState(newState);
+    m_stats.validPacketsProcessed++;
+    UpdatePacketRate();
+
+    // Dispatch to Windows Input Injection Manager
+    m_injectionManager.InjectControllerState(m_controllerState.GetState());
 
     return true;
 }
 
-ControllerStateData InputManager::GetControllerState() const
+ControllerStateData InputManager::GetCurrentState() const
 {
+    std::lock_guard<std::mutex> lock(m_mutex);
     return m_controllerState.GetState();
 }
 
 InputStatistics InputManager::GetInputStatistics() const
 {
-    return m_controllerState.GetStatistics();
-}
-
-void InputManager::ResetControllerState()
-{
-    m_lastSequenceNumber = 0;
-    m_controllerState.Reset();
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_stats;
 }

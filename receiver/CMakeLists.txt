@@ -19,6 +19,8 @@ add_executable(SYNKROADReceiver WIN32
     src/NetworkManager.cpp
     src/InputManager.cpp
     src/ControllerState.cpp
+    src/InputInjectionManager.cpp
+    src/KeyboardMouseBackend.cpp
     src/ui/controls/ToggleSwitch.cpp
 )
 
@@ -26,4 +28,5 @@ target_link_libraries(SYNKROADReceiver PRIVATE
     ws2_32
     bcrypt
     comctl32
+    user32
 )
