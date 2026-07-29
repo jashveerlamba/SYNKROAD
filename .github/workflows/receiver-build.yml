@@ -1,42 +1,32 @@
-name: Build Windows Receiver
+name: SYNKROAD Build CI
 
 on:
   push:
-    branches:
-      - main
-      - master
-
+    branches: [ "main", "master" ]
   pull_request:
-    branches:
-      - main
-      - master
-
+    branches: [ "main", "master" ]
   workflow_dispatch:
 
 jobs:
   build:
-
     runs-on: windows-latest
 
+    strategy:
+      matrix:
+        configuration: [Debug, Release]
+        platform: [x64]
+
     steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
 
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+    - name: Add MSBuild to PATH
+      uses: microsoft/setup-msbuild@v2
 
-      - name: Setup MSBuild
-        uses: microsoft/setup-msbuild@v2
-
-      - name: Configure CMake
-        run: |
-          cmake -S receiver -B build -A x64
-
-      - name: Build
-        run: |
-          cmake --build build --config Release
-
-      - name: Upload Receiver
-        uses: actions/upload-artifact@v4
-        with:
-          name: SYNKROADReceiver
-          path: |
-            build/Release/*.exe
+    - name: Build Project / Solution
+      run: |
+        if (Test-Path "*.sln") {
+            msbuild /m /p:Configuration=${{ matrix.configuration }} /p:Platform=${{ matrix.platform }}
+        } else {
+            msbuild /m /p:Configuration=${{ matrix.configuration }} /p:Platform=${{ matrix.platform }} *.vcxproj
+        }

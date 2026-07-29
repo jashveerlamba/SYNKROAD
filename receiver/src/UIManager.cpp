@@ -6,7 +6,14 @@
 #include <iomanip>
 #include <sstream>
 
-UIManager::~UIManager() = default;
+UIManager::~UIManager()
+{
+    if (m_statusBarFont)
+    {
+        DeleteObject(m_statusBarFont);
+        m_statusBarFont = nullptr;
+    }
+}
 
 ATOM UIManager::RegisterContentPanelClass(HINSTANCE instance)
 {
@@ -18,7 +25,7 @@ ATOM UIManager::RegisterContentPanelClass(HINSTANCE instance)
     wc.lpfnWndProc = UIManager::ContentPanelProc;
     wc.hInstance = instance;
     wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
-    wc.hbrBackground = CreateSolidBrush(RGB(245, 246, 248));
+    wc.hbrBackground = nullptr;
     wc.lpszClassName = CONTENT_PANEL_CLASS;
 
     registered = true;
@@ -35,7 +42,7 @@ ATOM UIManager::RegisterStatusBarClass(HINSTANCE instance)
     wc.lpfnWndProc = UIManager::StatusBarProc;
     wc.hInstance = instance;
     wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
-    wc.hbrBackground = CreateSolidBrush(RGB(238, 240, 243));
+    wc.hbrBackground = nullptr;
     wc.lpszClassName = STATUS_BAR_CLASS;
 
     registered = true;
@@ -157,15 +164,15 @@ std::wstring UIManager::GetFormattedTimestamp() const
 {
     auto now = std::chrono::system_clock::now();
     auto in_time_t = std::chrono::system_clock::to_time_t(now);
-    
+
     std::tm buf{};
     localtime_s(&buf, &in_time_t);
 
     std::wstringstream ss;
-    ss << std::setfill(L'0') 
-       << std::setw(2) << buf.tm_hour << L":"
-       << std::setw(2) << buf.tm_min << L":"
-       << std::setw(2) << buf.tm_sec;
+    ss << std::setfill(L'0')
+        << std::setw(2) << buf.tm_hour << L":"
+        << std::setw(2) << buf.tm_min << L":"
+        << std::setw(2) << buf.tm_sec;
 
     return ss.str();
 }
@@ -174,11 +181,16 @@ void UIManager::AppendLogToRichEdit(const LogEntry& entry)
 {
     if (!m_logRichEdit) return;
 
-    // Move insertion to the end
+    if (GetWindowThreadProcessId(m_logRichEdit, nullptr) != GetCurrentThreadId())
+    {
+        auto* heapEntry = new LogEntry(entry);
+        PostMessageW(m_parent, WM_SYNKROAD_APPEND_LOG, reinterpret_cast<WPARAM>(heapEntry), 0);
+        return;
+    }
+
     CHARRANGE cr{ -1, -1 };
     SendMessageW(m_logRichEdit, EM_EXSETSEL, 0, reinterpret_cast<LPARAM>(&cr));
 
-    // Determine Prefix text and Color
     std::wstring levelStr;
     COLORREF color = RGB(30, 30, 30);
 
@@ -186,19 +198,19 @@ void UIManager::AppendLogToRichEdit(const LogEntry& entry)
     {
     case LogLevel::Debug:
         levelStr = L"DEBUG";
-        color = RGB(120, 120, 120); // Gray
+        color = RGB(120, 120, 120);
         break;
     case LogLevel::Info:
         levelStr = L"INFO ";
-        color = RGB(33, 115, 70);   // Dark Green
+        color = RGB(33, 115, 70);
         break;
     case LogLevel::Warning:
         levelStr = L"WARN ";
-        color = RGB(217, 119, 6);   // Dark Amber/Orange
+        color = RGB(217, 119, 6);
         break;
     case LogLevel::Error:
         levelStr = L"ERROR";
-        color = RGB(220, 38, 38);   // Red
+        color = RGB(220, 38, 38);
         break;
     }
 
@@ -208,13 +220,11 @@ void UIManager::AppendLogToRichEdit(const LogEntry& entry)
     cf.cbSize = sizeof(CHARFORMAT2W);
     cf.dwMask = CFM_COLOR | CFM_FACE | CFM_SIZE;
     cf.crTextColor = color;
-    cf.yHeight = 180; // 9pt
+    cf.yHeight = 180;
     wcscpy_s(cf.szFaceName, L"Consolas");
 
     SendMessageW(m_logRichEdit, EM_SETCHARFORMAT, SCF_SELECTION, reinterpret_cast<LPARAM>(&cf));
     SendMessageW(m_logRichEdit, EM_REPLACESEL, FALSE, reinterpret_cast<LPARAM>(line.c_str()));
-
-    // Auto-scroll to the bottom
     SendMessageW(m_logRichEdit, WM_VSCROLL, SB_BOTTOM, 0);
 }
 
@@ -223,13 +233,17 @@ bool UIManager::Create(HWND parent)
     m_parent = parent;
     HINSTANCE instance = GetModuleHandleW(nullptr);
 
-    // Load Msftedit.dll / RichEdit v4.1 or fallback to RichEd20.dll
-    LoadLibraryW(L"Msftedit.dll");
+    LPCWSTR richEditClass = MSFTEDIT_CLASS;
+    HMODULE hRichEdit = LoadLibraryW(L"Msftedit.dll");
+    if (!hRichEdit)
+    {
+        hRichEdit = LoadLibraryW(L"Riched20.dll");
+        richEditClass = L"RichEdit20W";
+    }
 
     RegisterContentPanelClass(instance);
     RegisterStatusBarClass(instance);
 
-    // SYNKROAD Logo Label
     m_logoLabel = CreateWindowExW(
         0, L"STATIC", L"SYNKROAD",
         WS_CHILD | WS_VISIBLE,
@@ -237,7 +251,6 @@ bool UIManager::Create(HWND parent)
 
     if (!m_logoLabel) return false;
 
-    // Connection Status Indicator Label
     m_statusLabel = CreateWindowExW(
         0, L"STATIC", L"Disconnected",
         WS_CHILD | WS_VISIBLE | SS_CENTER,
@@ -245,7 +258,6 @@ bool UIManager::Create(HWND parent)
 
     if (!m_statusLabel) return false;
 
-    // Connect Toggle Switch
     if (!m_connectToggle.Create(m_parent, 1001, 0, 0, 0, 0))
     {
         return false;
@@ -258,7 +270,6 @@ bool UIManager::Create(HWND parent)
             SetConnectionStatus(connected ? ConnectionStatus::Connected : ConnectionStatus::Disconnected);
         });
 
-    // Content Panel Container
     m_contentPanel = CreateWindowExW(
         0, CONTENT_PANEL_CLASS, L"",
         WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN,
@@ -266,10 +277,9 @@ bool UIManager::Create(HWND parent)
 
     if (!m_contentPanel) return false;
 
-    // Log Control (RichEdit inside Content Panel)
     m_logRichEdit = CreateWindowExW(
         WS_EX_CLIENTEDGE,
-        MSFTEDIT_CLASS,
+        richEditClass,
         L"",
         WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY,
         0, 0, 0, 0,
@@ -278,28 +288,11 @@ bool UIManager::Create(HWND parent)
         instance,
         nullptr);
 
-    if (!m_logRichEdit)
-    {
-        // Fallback to RichEdit20W if Msftedit isn't available
-        m_logRichEdit = CreateWindowExW(
-            WS_EX_CLIENTEDGE,
-            L"RichEdit20W",
-            L"",
-            WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY,
-            0, 0, 0, 0,
-            m_contentPanel,
-            nullptr,
-            instance,
-            nullptr);
-    }
-
     if (m_logRichEdit)
     {
-        // Set background color to crisp off-white
         SendMessageW(m_logRichEdit, EM_SETBKGNDCOLOR, 0, RGB(252, 252, 253));
     }
 
-    // Status Bar Window Container
     m_statusBar = CreateWindowExW(
         0, STATUS_BAR_CLASS, L"",
         WS_CHILD | WS_VISIBLE,
@@ -312,16 +305,13 @@ bool UIManager::Create(HWND parent)
     SetConnectionStatus(ConnectionStatus::Disconnected);
     UpdateLayout();
 
-    // Initial startup log message
     LogInfo(L"Receiver started");
-
     return true;
 }
 
 void UIManager::SetConnectionStatus(ConnectionStatus status)
 {
     m_currentStatus = status;
-
     if (!m_statusLabel) return;
 
     switch (m_currentStatus)
@@ -435,27 +425,23 @@ void UIManager::UpdateLayout()
     int clientWidth = clientRect.right - clientRect.left;
     int clientHeight = clientRect.bottom - clientRect.top;
 
-    // 1. Position SYNKROAD Logo
     if (m_logoLabel)
     {
         SetWindowPos(m_logoLabel, nullptr, TOP_BAR_PADDING_X, TOP_BAR_PADDING_Y, LOGO_WIDTH, LOGO_HEIGHT, SWP_NOZORDER | SWP_NOACTIVATE);
     }
 
-    // 2. Position Connect Toggle Switch
     int toggleX = clientWidth - TOP_BAR_PADDING_X - TOGGLE_WIDTH;
     if (m_connectToggle.Handle())
     {
         SetWindowPos(m_connectToggle.Handle(), nullptr, toggleX, TOP_BAR_PADDING_Y - 2, TOGGLE_WIDTH, TOGGLE_HEIGHT, SWP_NOZORDER | SWP_NOACTIVATE);
     }
 
-    // 3. Position Status Label
     if (m_statusLabel)
     {
         int statusX = toggleX - STATUS_WIDTH - 10;
         SetWindowPos(m_statusLabel, nullptr, statusX, TOP_BAR_PADDING_Y + 3, STATUS_WIDTH, STATUS_HEIGHT, SWP_NOZORDER | SWP_NOACTIVATE);
     }
 
-    // 4. Position Bottom Status Bar
     int statusBarY = clientHeight - STATUS_BAR_HEIGHT;
     if (statusBarY < TOP_BAR_TOTAL_HEIGHT) statusBarY = TOP_BAR_TOTAL_HEIGHT;
 
@@ -464,7 +450,6 @@ void UIManager::UpdateLayout()
         SetWindowPos(m_statusBar, nullptr, 0, statusBarY, clientWidth, STATUS_BAR_HEIGHT, SWP_NOZORDER | SWP_NOACTIVATE);
     }
 
-    // 5. Position Central Main Content Panel
     int contentY = TOP_BAR_TOTAL_HEIGHT;
     int contentHeight = statusBarY - contentY;
     if (contentHeight < 0) contentHeight = 0;
@@ -474,7 +459,6 @@ void UIManager::UpdateLayout()
         SetWindowPos(m_contentPanel, nullptr, 0, contentY, clientWidth, contentHeight, SWP_NOZORDER | SWP_NOACTIVATE);
     }
 
-    // 6. Position Logging Control within Content Panel
     if (m_logRichEdit)
     {
         int logWidth = clientWidth - (2 * CONTENT_MARGIN);
