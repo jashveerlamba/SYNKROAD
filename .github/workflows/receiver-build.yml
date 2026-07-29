@@ -24,9 +24,20 @@ jobs:
       uses: microsoft/setup-msbuild@v2
 
     - name: Build Project / Solution
+      shell: powershell
       run: |
-        if (Test-Path "*.sln") {
-            msbuild /m /p:Configuration=${{ matrix.configuration }} /p:Platform=${{ matrix.platform }}
-        } else {
-            msbuild /m /p:Configuration=${{ matrix.configuration }} /p:Platform=${{ matrix.platform }} *.vcxproj
+        # Search for .sln file first
+        $target = Get-ChildItem -Path . -Filter "*.sln" -Recurse | Select-Object -First 1 -ExpandProperty FullName
+
+        # If no .sln found, search for .vcxproj file
+        if (-not $target) {
+            $target = Get-ChildItem -Path . -Filter "*.vcxproj" -Recurse | Select-Object -First 1 -ExpandProperty FullName
         }
+
+        if (-not $target) {
+            Write-Error "No .sln or .vcxproj files found in the repository!"
+            exit 1
+        }
+
+        Write-Host "Building target: $target"
+        msbuild /m /p:Configuration=${{ matrix.configuration }} /p:Platform=${{ matrix.platform }} "$target"
