@@ -14,7 +14,6 @@ jobs:
     strategy:
       matrix:
         configuration: [Debug, Release]
-        platform: [x64]
 
     steps:
     - name: Checkout Repository
@@ -23,21 +22,37 @@ jobs:
     - name: Add MSBuild to PATH
       uses: microsoft/setup-msbuild@v2
 
-    - name: Build Project / Solution
+    - name: Auto-Detect and Build
       shell: powershell
       run: |
-        # Search for .sln file first
-        $target = Get-ChildItem -Path . -Filter "*.sln" -Recurse | Select-Object -First 1 -ExpandProperty FullName
+        Write-Host "--- Scanning Repository Files ---"
+        Get-ChildItem -Path . -Recurse | Select-Object -ExpandProperty FullName
 
-        # If no .sln found, search for .vcxproj file
-        if (-not $target) {
-            $target = Get-ChildItem -Path . -Filter "*.vcxproj" -Recurse | Select-Object -First 1 -ExpandProperty FullName
+        # 1. Check for CMakeLists.txt
+        $cmakeFile = Get-ChildItem -Path . -Filter "CMakeLists.txt" -Recurse | Select-Object -First 1
+        if ($cmakeFile) {
+            Write-Host "Found CMake project at: $($cmakeFile.DirectoryName)"
+            Set-Location $cmakeFile.DirectoryName
+            cmake -B build -DCMAKE_BUILD_TYPE=${{ matrix.configuration }}
+            cmake --build build --config ${{ matrix.configuration }}
+            exit $LASTEXITCODE
         }
 
-        if (-not $target) {
-            Write-Error "No .sln or .vcxproj files found in the repository!"
-            exit 1
+        # 2. Check for .sln
+        $slnFile = Get-ChildItem -Path . -Filter "*.sln" -Recurse | Select-Object -First 1
+        if ($slnFile) {
+            Write-Host "Found Solution at: $($slnFile.FullName)"
+            msbuild /m /p:Configuration=${{ matrix.configuration }} /p:Platform="x64" "$($slnFile.FullName)"
+            exit $LASTEXITCODE
         }
 
-        Write-Host "Building target: $target"
-        msbuild /m /p:Configuration=${{ matrix.configuration }} /p:Platform=${{ matrix.platform }} "$target"
+        # 3. Check for .vcxproj
+        $vcxprojFile = Get-ChildItem -Path . -Filter "*.vcxproj" -Recurse | Select-Object -First 1
+        if ($vcxprojFile) {
+            Write-Host "Found C++ Project at: $($vcxprojFile.FullName)"
+            msbuild /m /p:Configuration=${{ matrix.configuration }} /p:Platform="x64" "$($vcxprojFile.FullName)"
+            exit $LASTEXITCODE
+        }
+
+        Write-Error "Could not find CMakeLists.txt, .sln, or .vcxproj in repository!"
+        exit 1
