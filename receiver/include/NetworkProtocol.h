@@ -2,7 +2,6 @@
 
 #include <cstdint>
 
-// Enum class for controller buttons
 enum class ControllerButton {
     A, B, X, Y,
     DPAD_UP, DPAD_DOWN, DPAD_LEFT, DPAD_RIGHT,
@@ -10,7 +9,6 @@ enum class ControllerButton {
     START, BACK
 };
 
-// Payload matching controller input data
 struct ControllerInputPayload {
     float leftStickX = 0.0f;
     float leftStickY = 0.0f;

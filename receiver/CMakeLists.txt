@@ -1,32 +1,17 @@
-cmake_minimum_required(VERSION 3.20)
-
-project(SYNKROADReceiver LANGUAGES CXX)
+cmake_minimum_required(VERSION 3.16)
+project(SYNKROADReceiver CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-add_definitions(-DUNICODE -D_UNICODE -DWIN32_LEAN_AND_MEAN -D_WIN32_WINNT=0x0601)
+# Prevent Windows header macro collisions globally across all 22 steps
+add_compile_definitions(WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
 
-include_directories(
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-)
+include_directories(include)
 
-add_executable(SYNKROADReceiver WIN32
-    src/main.cpp
-    src/MainWindow.cpp
-    src/UIManager.cpp
-    src/ConfigManager.cpp
-    src/NetworkManager.cpp
-    src/InputManager.cpp
-    src/ControllerState.cpp
-    src/InputInjectionManager.cpp
-    src/KeyboardMouseBackend.cpp
-    src/ui/controls/ToggleSwitch.cpp
-)
+file(GLOB SOURCES "src/*.cpp")
 
-target_link_libraries(SYNKROADReceiver PRIVATE
-    ws2_32
-    bcrypt
-    comctl32
-    user32
-)
+add_executable(SYNKROADReceiver ${SOURCES})
+
+# Link required Windows libraries
+target_link_libraries(SYNKROADReceiver PRIVATE ws2_32 user32 gdi32 comctl32)

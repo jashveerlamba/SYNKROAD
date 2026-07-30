@@ -1,17 +1,16 @@
 #pragma once
 
-#ifndef UNICODE
-#define UNICODE
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
 #endif
-#ifndef _UNICODE
-#define _UNICODE
+#ifndef NOMINMAX
+#define NOMINMAX
 #endif
 
 #include <windows.h>
 #include <string>
 #include <vector>
 #include <mutex>
-#include <functional>
 
 #define WM_SYNKROAD_APPEND_LOG (WM_USER + 101)
 
